@@ -50,25 +50,15 @@ def export_and_test_preprocess(data, policy, models_base_path):
         elif "GR00TTransform" in step_class_name:
             state_action_step = getattr(
                 export_gr00t_state_action, step_class_name)
-            # import pdb
-            # pdb.set_trace()
-            # vlm_processor = params["vlm_processor"]
-            # metadata = {
-            #     "image_size": vlm_processor.image_size,
-            #     "context_len": vlm_processor.context_len,
-            #     "per_tile_len": vlm_processor.per_tile_len,
-            #     "model_spec": vlm_processor.model_spec.__dict__,
-            #     "max_input_tiles": vlm_processor.max_input_tiles,
-            #     "norm_type": vlm_processor.norm_type,
-            # }
-            # params["vlm_processor_metadata"] = metadata
-            # with open(models_base_path+"/tokenizer_params.yaml", "w") as f:
-            #     save_params = copy.deepcopy(params)
-            #     del save_params["embodiment_tag"]
-            #     del save_params["vlm_processor"]
-            #     print(save_params)
-            #     yaml.dump(save_params, f, default_flow_style=False)
-
+            metadata = {
+                'default_instruction': params['default_instruction'],
+                'embodiment_tag': params['embodiment_tag'].value,
+                'embodiment_tag_mapping': params['embodiment_tag_mapping'],
+                'apply_to': params['apply_to'],
+                'formalize_language': params['formalize_language'],
+            }
+            with open(os.path.join(models_base_path, "tokenizer_params.yaml"), "w") as f:
+                yaml.dump(metadata, f, default_flow_style=False)
         else:
             print(f"Unknown module type: {step_class_name}")
             continue
@@ -126,26 +116,25 @@ def export_and_test_preprocess(data, policy, models_base_path):
     yaml.dump(describe_video_inputs, open(
         models_base_path+"/preprocess_video.yaml", "w"))
 
-    # with open(models_base_path+"/tokenizer_params.yaml", "r") as f:
-    #     params = yaml.load(f, Loader=yaml.FullLoader)
-    # video_language_module = export_gr00t_video_language.GR00TTransform(
-    #     **params)
+    with open(os.path.join(models_base_path, "tokenizer_params.yaml"), "r") as f:
+        tokenizer_params = yaml.load(f, Loader=yaml.FullLoader)
+    video_language_module = export_gr00t_video_language.GR00TTransform(
+        **tokenizer_params)
 
-    # video_language_inputs = {**video_output, **language_inputs}
-    # input_description, input_format = describe_io(video_language_inputs)
+    video_language_inputs = {**video_output, **language_inputs}
+    input_description, input_format = describe_io(video_language_inputs)
 
-    # video_language_output = video_language_module(video_language_inputs)
-    # output_description, output_format = describe_io(video_language_output)
-    # describe_video_language_inputs = {"inference": {"input_nodes": input_description,
-    #                                                 "output_nodes": output_description,
-    #                                                 "input_format": [input_format],
-    #                                                 "output_format": output_format}}
-    # yaml.dump(describe_video_language_inputs, open(
-    #     models_base_path+"/preprocess_video_language.yaml", "w"))
+    video_language_output = video_language_module(video_language_inputs)
+    output_description, output_format = describe_io(video_language_output)
+    describe_video_language_inputs = {"inference": {"input_nodes": input_description,
+                                                    "output_nodes": output_description,
+                                                    "input_format": [input_format],
+                                                    "output_format": output_format}}
+    yaml.dump(describe_video_language_inputs, open(
+        models_base_path+"/preprocess_video_language.yaml", "w"))
 
     # Combine video_output and state_action_output_export into a single dictionary
-    # output_export = {**state_action_output_export, **video_language_output}
-    output_export = state_action_output_export
+    output_export = {**state_action_output_export, **video_language_output}
 
     return test_gr00t_process_consistency(output_export, output_gr00t)
 

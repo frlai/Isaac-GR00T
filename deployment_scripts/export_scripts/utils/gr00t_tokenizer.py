@@ -2,301 +2,228 @@ import numpy as np
 import torch
 import torch.nn as nn
 from typing import Dict, Any, List, Optional
-from .eagle2_hg_model.inference_eagle_repo import EagleProcessor
+from PIL import Image
+import os
+from transformers import AutoProcessor
 
-# Default system message used in prompts
+
 DEFAULT_SYSTEM_MESSAGE = "You are a helpful assistant."
 
-EAGLE_KEYS = ["pixel_values", "input_ids", "attention_mask"]
-
-
-def collate_gr00t(features: List[dict], processor, device: str) -> dict:
-    batch = {}
-    keys = features[0].keys()
-    assert all(
-        all(key in feature for key in keys) for feature in features
-    ), "All features must have the same keys."
-
-    assert all(key in EAGLE_KEYS for key in keys), f"unexpected keys: {keys=}"
-
-    vlm_batch = processor.collate_fn(features)
-
-    # Create the batch dictionary from the VLM processor output
-    batch = {}
-    # Convert all values in vlm_batch to the appropriate device if they are tensors
-    for key, value in vlm_batch.items():
-        if isinstance(value, torch.Tensor):
-            batch[key] = value.to(device)
-        else:
-            batch[key] = value
-
-    return batch
+EMBODIMENT_TAG_MAPPING = {'new_embodiment': 31}
 
 
 class GR00TTransform(nn.Module):
     """
-    Handles video and language processing for GR00T models.
-    This complements the TorchScript-compatible GR00TTransform which only handles state processing.
-    Implemented as a PyTorch nn.Module to fit into model pipelines.
+    Standalone tokenizer/transformer that processes only video and language.
+    - Implemented as an nn.Module
+    - No dependency on EagleProcessor or gr00t.data.*
+    - Loads a processor from a provided model path (trust_remote_code=True)
     """
 
     def __init__(
         self,
-        vlm_processor_metadata: Dict = {},
+        model_path: str = os.path.join(
+            os.path.dirname(__file__), "eagle2_hg_model"),
         default_instruction: str = "Perform the default behavior.",
         language_key: Optional[str] = None,
-        **kwargs
-    ):
-        """
-        Initialize the GR00TTokenizer.
+        embodiment_tag: str = 'new_embodiment',
+        embodiment_tag_mapping: dict[str, int] = EMBODIMENT_TAG_MAPPING,
+        ** _: Any,
+    ) -> None:
+        super().__init__()
+        self.processor = AutoProcessor.from_pretrained(
+            model_path, trust_remote_code=True, use_fast=True
+        )
+        # Set left padding if tokenizer exists and supports it
+        if hasattr(self.processor, "tokenizer") and hasattr(self.processor.tokenizer, "padding_side"):
+            self.processor.tokenizer.padding_side = "left"
 
-        Args:
-            vlm_processor: The processor for vision-language processing
-            (must implement prepare_input method)
-            default_instruction: Default instruction to use if language is not provided
-            language_key: The key for language in the input data
-            **kwargs: Additional arguments for compatibility
-        """
-        super(GR00TTransform, self).__init__()
-        self.vlm_processor = EagleProcessor(**vlm_processor_metadata)
         self.default_instruction = default_instruction
         self.language_key = language_key
+        self.embodiment_id = embodiment_tag_mapping[embodiment_tag]
 
-    def check_language_key(self, data: Dict) -> None:
-        """
-        Extract language key if present in the data.
-
-        Args:
-            data: Input data dictionary
-        """
-        # Group keys by modality
-        grouped_keys = {}
+    # ---------- helpers ----------
+    def _detect_language_key(self, data: Dict[str, Any]) -> None:
+        if self.language_key:
+            return
+        grouped_keys: Dict[str, List[str]] = {}
         for key in data.keys():
             try:
                 modality, _ = key.split(".")
             except Exception:  # noqa: E722
-                # Handle language annotation special case
-                if "annotation" in key:
-                    modality = "language"
-                else:
-                    modality = "others"  # will contain the video, state, and action
-            if modality not in grouped_keys:
-                grouped_keys[modality] = []
-            grouped_keys[modality].append(key)
-
-        # Handle language key
+                modality = "language" if "annotation" in key else "others"
+            grouped_keys.setdefault(modality, []).append(key)
         if "language" in grouped_keys and len(grouped_keys["language"]) > 0:
             language_keys = grouped_keys["language"]
             if len(language_keys) == 1:
                 self.language_key = language_keys[0]
 
-    def _prepare_video(self, data: Dict) -> np.ndarray:
+    def _prepare_video_numpy(self, video: Any) -> np.ndarray:
         """
-        Process, stack, and pad images from data['video'].
-
-        Args:
-            data: Input data dictionary
-
-        Returns:
-            Processed video frames
+        Accepts video as a NumPy array or a Torch tensor with shapes:
+        - [T, V, H, W, C] (single sample)
+        - [B, T, V, H, W, C] (batched)
+        Returns uint8 numpy array for a single sample in shape [V, T, C, H, W].
         """
-        video = data["video"]  # [t v h w c]
-        return video
+        if isinstance(video, torch.Tensor):
+            video = video.detach().cpu().numpy()
+        assert video.ndim in (5, 6), f"Unsupported video ndim: {video.ndim}"
+        if video.ndim == 6:
+            # Caller should slice per-sample before calling this helper
+            raise ValueError(
+                "_prepare_video_numpy expects a single sample (5D). Got 6D.")
+        # video: [T, V, H, W, C] -> [V, T, C, H, W]
+        video = video.astype(np.uint8, copy=False)
+        video_vtchw = np.transpose(video, (1, 0, 4, 2, 3))
+        return video_vtchw
 
-    def _prepare_language(self, data: Dict) -> str:
-        """
-        Extract and potentially transform language input.
-
-        Args:
-            data: Input data dictionary
-
-        Returns:
-            Processed language instruction
-        """
+    def _prepare_language(self, data: Dict[str, Any]) -> str:
         if self.language_key is not None and self.language_key in data:
             raw_language = data[self.language_key]
             if isinstance(raw_language, list):
                 raw_language = raw_language[0]
         else:
             raw_language = self.default_instruction
-
         return raw_language
 
-    def _apply_gr00t_processing(self, images: np.ndarray, language: str) -> Dict:
+    def _build_conversation(self, images_vtchw: np.ndarray, language: str) -> List[Dict[str, Any]]:
         """
-        Apply VLM processing to images and language.
-
-        Args:
-            images: Processed video frames
-            language: Processed language instruction
-
-        Returns:
-            Dictionary with processed inputs for the VLM model
+        Build a conversation structure expected by many VLM processors that implement
+        apply_chat_template/process_vision_info via trust_remote_code.
+        images_vtchw: [V, T, C, H, W]
         """
-        # Ensure images have the right shape
-        if not images.shape[0] == 1:
-            raise ValueError(
-                "Expected single timestep, check formatting when doing multi-time step")
-        # Remove the singleton time dimension
-        images = images[0]
-        # Convert tensor to numpy array if needed
-        if isinstance(images, torch.Tensor):
-            images = images.detach().cpu().numpy()
+        v, t, c, h, w = images_vtchw.shape
+        # Flatten into frames: [(C,H,W)] with order (t, v)
+        # Create PIL images in HWC order per frame
+        frames_chw = images_vtchw.transpose(
+            1, 0, 2, 3, 4).reshape(t * v, c, h, w)
+        frames_hwc = [np.transpose(fr, (1, 2, 0)) for fr in frames_chw]
+        pil_images = [Image.fromarray(fr) for fr in frames_hwc]
 
-        images = [{"np_array": images[idx]} for idx in range(len(images))]
-        # Create prompt with system message and user content
-        prompt = [
-            {"role": "system", "content": DEFAULT_SYSTEM_MESSAGE},
+        text_content = [{"type": "text", "text": language}]
+        image_content = [{"type": "image", "image": img} for img in pil_images]
+        conversation = [
             {
                 "role": "user",
-                "content": language,
-                "image": images,
-            },
+                "content": image_content + text_content,
+            }
         ]
+        return conversation
 
-        # Process with VLM processor
-        inputs = self.vlm_processor.prepare_input({"prompt": prompt})
-        return inputs
+    # ---------- core processing ----------
+    def _tokenize_with_processor(self, conversations: List[List[Dict[str, Any]]], device: torch.device) -> Dict[str, torch.Tensor]:
+        # Build text list using chat templates
+        text_list: List[str] = []
+        image_inputs_batch: List[Any] = []
+        for conv in conversations:
+            # Some processors implement apply_chat_template/process_vision_info via remote code
+            if hasattr(self.processor, "apply_chat_template"):
+                text = self.processor.apply_chat_template(
+                    conv, tokenize=False, add_generation_prompt=True
+                )
+            else:
+                # Fallback: simple user message
+                text = DEFAULT_SYSTEM_MESSAGE + "\n" + "; ".join(
+                    c.get("text", "") if isinstance(c, dict) else "" for c in conv[0].get("content", [])
+                )
+            text_list.append(text)
 
-    def process(self, data: Dict, device: str) -> Dict:
-        """
-        Process video and language inputs.
+            if hasattr(self.processor, "process_vision_info"):
+                image_inputs, _ = self.processor.process_vision_info(conv)
+            else:
+                # Fallback: extract PIL images directly
+                pil_images = [c["image"] for c in conv[0]["content"]
+                              if isinstance(c, dict) and c.get("type") == "image"]
+                image_inputs = pil_images
+            image_inputs_batch.append(image_inputs)
 
-        Args:
-            data: Input data dictionary (non-batched)
+        inputs = self.processor(
+            text=text_list,
+            images=image_inputs_batch,
+            return_tensors="pt",
+            padding=True,
+        )
+        # Move to device and prefix keys with 'eagle_'
+        outputs: Dict[str, Any] = {}
+        for k, v in list(inputs.items()):
+            if isinstance(v, torch.Tensor):
+                v = v.to(device)
+            outputs[f"eagle_{k}"] = v
+        return outputs
 
-        Returns:
-            Dictionary with processed inputs
-        """
-        # Check for language key in data
-        self.check_language_key(data)
-        # 1) Extract and process video and language
-        images = self._prepare_video(data)
-
-        if isinstance(images, torch.Tensor):
-            images = images.detach().cpu().numpy()
-        if isinstance(images, np.ndarray):
-            images = images.astype(np.uint8)
-
+    def _process_single(self, data: Dict[str, Any], device: torch.device) -> Dict[str, torch.Tensor]:
+        self._detect_language_key(data)
+        video = data["video"]
+        if isinstance(video, torch.Tensor) and video.ndim == 4:
+            # Unsqueeze to [T, V, H, W, C] if necessary
+            while video.ndim < 5:
+                video = video.unsqueeze(0)
+        video_np = self._prepare_video_numpy(video)
         language = self._prepare_language(data)
+        conversation = self._build_conversation(video_np, language)
+        return self._tokenize_with_processor([conversation], device)
 
-        # 2) Apply VLM processing
-        vlm_outputs = self._apply_gr00t_processing(images, language)
-        # 3) Return processed outputs
-        result = {}
-        for k, v in vlm_outputs.items():
-            result[k] = v.to(device=device)
-
-        return result
-
-    def process_batch(self, data: Dict, batch_size: int, device: str) -> Dict:
-        """
-        Process a batch of data.
-
-        Args:
-            data: Input data dictionary
-            batch_size: Batch size
-
-        Returns:
-            Dictionary with processed inputs
-        """
-        # Split on batch dimension.
-        data_split = []
+    def _process_batch(self, data: Dict[str, Any], batch_size: int, device: torch.device) -> Dict[str, torch.Tensor]:
+        # Split along batch dimension and build conversations
+        conversations: List[List[Dict[str, Any]]] = []
         for i in range(batch_size):
-            single_data = {}
+            single: Dict[str, Any] = {}
             for key, value in data.items():
-                # Special handling for string values to prevent character-wise splitting
                 if isinstance(value, str):
-                    # For string values, keep the entire string instead of indexing
-                    single_data[key] = value
+                    single[key] = value
                 else:
-                    # For arrays and other data types, extract the i-th element
                     try:
-                        single_data[key] = value[i]
+                        single[key] = value[i]
                     except (TypeError, IndexError):
-                        # If value is not indexable or index is out of bounds, use the whole value
-                        single_data[key] = value
-            data_split.append(single_data)
+                        single[key] = value
+            self._detect_language_key(single)
+            video_np = self._prepare_video_numpy(single["video"])
+            language = self._prepare_language(single)
+            conversations.append(self._build_conversation(video_np, language))
+        return self._tokenize_with_processor(conversations, device)
 
-        # Process each element.
-        data_split_processed = [self.process(
-            elem, device) for elem in data_split]
-
-        return collate_gr00t(data_split_processed, self.vlm_processor, device)
-
-    def check_keys_and_batch_size(self, data):
-        grouped_keys = {}
-        for key in data.keys():
-            try:
-                modality, _ = key.split(".")
-            except Exception:  # noqa: E722
-                # Handle language annotation special case
-                if "annotation" in key:
-                    modality = "language"
-                else:
-                    modality = "others"  # will contain the video, state, and action
-            if modality not in grouped_keys:
-                grouped_keys[modality] = []
-            grouped_keys[modality].append(key)
-        # Use video key to determine batch size.
-        video_ndim = data["video"].ndim
-        if video_ndim == 5:  # Interpret as [T, V, H, W, C]
-            is_batched = False
-            batch_size = 1
-        elif video_ndim == 6:  # Interpret as [B, T, V, H, W, C]
-            is_batched = True
-            batch_size = data["video"].shape[0]
+    def _check_batch(self, data: Dict[str, Any]) -> tuple[bool, int]:
+        video = data["video"]
+        if isinstance(video, torch.Tensor):
+            ndim = video.ndim
         else:
-            raise ValueError(
-                f"Unsupported video number of dimensions: {video_ndim}")
+            ndim = np.asarray(video).ndim
+        if ndim == 5:  # [T, V, H, W, C]
+            return False, 1
+        if ndim == 6:  # [B, T, V, H, W, C]
+            return True, int(video.shape[0])
+        raise ValueError(f"Unsupported video number of dimensions: {ndim}")
 
-        # Handle language
-        if "language" in grouped_keys:
-            language_keys = grouped_keys["language"]
-            assert len(language_keys) == 1, f"{language_keys=}"
-            self._language_key = language_keys[0]
-        return is_batched, batch_size
+    # ---------- nn.Module API ----------
+    def forward(self, data: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+        # Determine device from incoming tensors
+        tensor_devices = [
+            v.device for v in data.values() if isinstance(v, torch.Tensor)]
+        device = tensor_devices[0] if len(
+            tensor_devices) > 0 else torch.device("cpu")
 
-    def forward(self, data: Dict) -> Dict:
-        """
-        Forward method for nn.Module compatibility.
-        Process the input data.
-
-        Args:
-            data: Input data dictionary
-
-        Returns:
-            Dictionary with processed inputs
-        """
-
-        device = 'cpu'
-        key_devices = []
-        # If the number of dimensions on "image" is less than 6, unsqueeze until there are 6 dimensions
-        if "video" in data and data["video"].ndim == 4:
+        # Normalize video dims to at least 5D for single sample usage in helpers
+        if "video" in data and isinstance(data["video"], torch.Tensor) and data["video"].ndim == 4:
             while data["video"].ndim < 6:
                 data["video"] = data["video"].unsqueeze(0)
-        for key, value in data.items():
-            if isinstance(value, torch.Tensor):
-                print(key, value.shape, value.dtype)
-            else:
-                print(key, value)
-        for key in data.keys():
-            if isinstance(data[key], torch.Tensor):
-                key_devices.append(data[key].device)
 
-        if all(device == key_devices[0] for device in key_devices):
-            device = key_devices[0]
-
-        is_batched, batch_size = self.check_keys_and_batch_size(data)
+        is_batched, batch_size = self._check_batch(data)
         if is_batched:
-            retval = self.process_batch(data, batch_size, device)
+            outputs = self._process_batch(data, batch_size, device)
         else:
-            retval = self.process(data, device)
+            outputs = self._process_single(data, device)
 
-        for k, v in retval.items():
-            if v.dtype == torch.bfloat16:
-                retval[k] = v.to(torch.float16)
-            elif v.dtype == torch.int64:
-                retval[k] = v.to(torch.int32)
+        # Optional dtype normalization similar to example
+        for k, v in list(outputs.items()):
+            if isinstance(v, torch.Tensor):
+                if v.dtype == torch.bfloat16:
+                    outputs[k] = v.to(torch.float16)
+                elif v.dtype == torch.int64:
+                    outputs[k] = v.to(torch.int32)
 
-        return retval
+        # Always include embodiment_id as int32 tensor on the target device with shape [1]
+        outputs["embodiment_id"] = torch.tensor(
+            [self.embodiment_id], device=device, dtype=torch.int32
+        )
+
+        return outputs

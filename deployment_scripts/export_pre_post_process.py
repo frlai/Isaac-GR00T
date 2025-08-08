@@ -37,5 +37,7 @@ if __name__ == "__main__":
     step_data = dataset[0]
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    export_and_test_preprocess(step_data, policy, save_path)
-    export_and_test_postprocess(step_data, policy, save_path)
+    export_and_test_preprocess(
+        step_data, policy, os.path.join(save_path, "preprocess"))
+    export_and_test_postprocess(
+        step_data, policy, os.path.join(save_path, "postprocess"))
