@@ -180,6 +180,7 @@ class GR00TTransform(nn.Module):
             video_np = self._prepare_video_numpy(single["video"])
             language = self._prepare_language(single)
             conversations.append(self._build_conversation(video_np, language))
+
         return self._tokenize_with_processor(conversations, device)
 
     def _check_batch(self, data: Dict[str, Any]) -> tuple[bool, int]:

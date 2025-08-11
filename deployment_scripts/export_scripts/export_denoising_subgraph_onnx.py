@@ -33,11 +33,11 @@ torch.cuda.manual_seed(42)
 
 class StandaloneDenoisingSubgraph(nn.Module):
     """Standalone denoising subgraph for ONNX export - N1.5 compatible with integrated backbone processing
-    
+
     This module combines the complete action head pipeline including backbone processing 
     (vlln, vl_self_attention) and action components (state_encoder, action_encoder, 
     action_decoder, DiT model, future_tokens) into a single ONNX-exportable subgraph.
-    
+
     Processes raw backbone_features through the complete N1.5 action head pipeline.
     """
 
@@ -48,38 +48,45 @@ class StandaloneDenoisingSubgraph(nn.Module):
         dtype = torch.float16
 
         # Use the same direct conversion approach as individual exports
-        self.state_encoder = copy.deepcopy(policy.model.action_head.state_encoder)
+        self.state_encoder = copy.deepcopy(
+            policy.model.action_head.state_encoder)
         self.state_encoder = self.state_encoder.to(dtype).eval()
-        
-        self.action_encoder = copy.deepcopy(policy.model.action_head.action_encoder) 
+
+        self.action_encoder = copy.deepcopy(
+            policy.model.action_head.action_encoder)
         self.action_encoder = self.action_encoder.to(dtype).eval()
-        
-        self.action_decoder = copy.deepcopy(policy.model.action_head.action_decoder)
+
+        self.action_decoder = copy.deepcopy(
+            policy.model.action_head.action_decoder)
         self.action_decoder = self.action_decoder.to(dtype).eval()
-        
+
         self.dit_model = copy.deepcopy(policy.model.action_head.model)
         self.dit_model = self.dit_model.to(dtype).eval()
-        
+
         # Add future_tokens for N1.5 compatibility
-        self.future_tokens = copy.deepcopy(policy.model.action_head.future_tokens)
+        self.future_tokens = copy.deepcopy(
+            policy.model.action_head.future_tokens)
         self.future_tokens = self.future_tokens.to(dtype).eval()
-        
+
         # Add vlln and vl_self_attention for complete backbone processing
         self.vlln = copy.deepcopy(policy.model.action_head.vlln)
         self.vlln = self.vlln.to(dtype).eval()
-        
-        self.vl_self_attention = copy.deepcopy(policy.model.action_head.vl_self_attention)
+
+        self.vl_self_attention = copy.deepcopy(
+            policy.model.action_head.vl_self_attention)
         self.vl_self_attention = self.vl_self_attention.to(dtype).eval()
 
         # Use the SAME num_inference_timesteps as the individual TensorRT engines
         self.num_inference_timesteps = 4
-        print(f"ONNX Export - Using num_inference_timesteps={self.num_inference_timesteps}")
+        print(
+            f"ONNX Export - Using num_inference_timesteps={self.num_inference_timesteps}")
         self.num_timestep_buckets = policy.model.action_head.num_timestep_buckets
         self.action_horizon = policy.model.action_head.config.action_horizon
         self.action_dim = policy.model.action_head.config.action_dim
 
         if hasattr(policy.model.action_head, 'position_embedding') and policy.model.action_head.config.add_pos_embed:
-            self.position_embedding = copy.deepcopy(policy.model.action_head.position_embedding)
+            self.position_embedding = copy.deepcopy(
+                policy.model.action_head.position_embedding)
             self.position_embedding = self.position_embedding.to(dtype).eval()
             self.add_pos_embed = True
         else:
@@ -88,7 +95,7 @@ class StandaloneDenoisingSubgraph(nn.Module):
         # Get dimensions from policy configuration
         action_horizon = policy.model.action_head.config.action_horizon
         action_dim = policy.model.action_head.config.action_dim
-        
+
         init_actions_tensor = torch.randn(
             (1, action_horizon, action_dim),
             dtype=torch.float16, device="cuda"
@@ -100,12 +107,12 @@ class StandaloneDenoisingSubgraph(nn.Module):
     def forward(self, embeddings: torch.Tensor, state: torch.Tensor, embodiment_id: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for denoising subgraph with integrated backbone processing.
-        
+
         Args:
             embeddings: Raw backbone features of shape (B, seq_len, backbone_embed_dim)
             state: State tensor of shape (B, state_seq_len, state_dim)
             embodiment_id: Embodiment IDs of shape (B,) - input as int32, cast to int64 internally
-        
+
         Returns:
             actions: Denoised action predictions of shape (B, action_horizon, action_dim)
         """
@@ -121,7 +128,7 @@ class StandaloneDenoisingSubgraph(nn.Module):
         embodiment_id = embodiment_id.to(torch.int32)
 
         state_features = self.state_encoder(state, embodiment_id)
-        
+
         # Use the registered init_actions buffer
         actions = self.init_actions.expand(batch_size, -1, -1).clone()
 
@@ -144,8 +151,10 @@ class StandaloneDenoisingSubgraph(nn.Module):
 
             # Join vision, language, state and action embedding along sequence dimension
             # Following N1.5 pattern: state_features, future_tokens, action_features
-            future_tokens = self.future_tokens.weight.unsqueeze(0).expand(batch_size, -1, -1)
-            sa_embs = torch.cat((state_features, future_tokens, action_features), dim=1)
+            future_tokens = self.future_tokens.weight.unsqueeze(
+                0).expand(batch_size, -1, -1)
+            sa_embs = torch.cat(
+                (state_features, future_tokens, action_features), dim=1)
             model_output = self.dit_model(
                 sa_embs, vl_embs, timesteps_tensor)
             pred = self.action_decoder(model_output, embodiment_id)
@@ -224,35 +233,38 @@ def _create_synthetic_tensors(policy, input_state, attention_mask):
     """Helper function to create synthetic tensors for integrated backbone processing"""
     # Use backbone embedding dimension since we now process raw backbone features
     backbone_embedding_dim = policy.model.action_head.config.backbone_embedding_dim
-    
+
     print(f"Using dimensions for integrated backbone processing:")
-    print(f"  embeddings (raw backbone): (1, {attention_mask.shape[1]}, {backbone_embedding_dim})")
+    print(
+        f"  embeddings (raw backbone): (1, {attention_mask.shape[1]}, {backbone_embedding_dim})")
     print(f"  state: {input_state.shape}")
-    
-    embeddings = torch.randn((1, attention_mask.shape[1], backbone_embedding_dim), dtype=torch.float16, device="cuda")
-    state = torch.randn((1, input_state.shape[1], input_state.shape[2]), dtype=torch.float16, device="cuda") 
+
+    embeddings = torch.randn(
+        (1, attention_mask.shape[1], backbone_embedding_dim), dtype=torch.float16, device="cuda")
+    state = torch.randn(
+        (1, input_state.shape[1], input_state.shape[2]), dtype=torch.float16, device="cuda")
     embodiment_id = torch.ones((1), dtype=torch.int32, device="cuda")
-    
+
     return embeddings, state, embodiment_id
 
 
 def export_denoising_subgraph(policy, input_state, attention_mask, save_model_path):
     """Export denoising subgraph to ONNX with validation - N1.5 compatible with integrated backbone processing
-    
+
     This subgraph includes the complete action head pipeline with integrated backbone processing
     (vlln, vl_self_attention) and processes raw backbone_features through the full denoising loop.
-    
+
     Args:
         policy: GR00T policy object
         input_state: Processed state tensor from get_input_info()
         attention_mask: Attention mask from get_input_info()
         save_model_path: Directory path (output will be save_model_path/denoising_subgraph.onnx)
-        
+
     Returns:
         bool: True if export and validation succeeded
     """
     print("Exporting denoising subgraph...")
-    
+
     # Set up policy model
     policy.model.to("cuda", dtype=torch.float16)
     policy.model.eval()
@@ -262,7 +274,8 @@ def export_denoising_subgraph(policy, input_state, attention_mask, save_model_pa
     model = StandaloneDenoisingSubgraph(policy).cuda().eval()
 
     # Create synthetic tensors using input_state and attention_mask dimensions
-    embeddings, state, embodiment_id = _create_synthetic_tensors(policy, input_state, attention_mask)
+    embeddings, state, embodiment_id = _create_synthetic_tensors(
+        policy, input_state, attention_mask)
 
     # Set output path
     output_path = os.path.join(save_model_path, "denoising_subgraph.onnx")
@@ -273,12 +286,10 @@ def export_denoising_subgraph(policy, input_state, attention_mask, save_model_pa
     # Always validate the exported model
     is_valid, ort_session = validate_model(
         model, output_path, embeddings, state, embodiment_id)
-    
+
     if is_valid:
         print("\nVALIDATION PASSED")
         return True
     else:
         print("\nVALIDATION FAILED")
         return False
-
-

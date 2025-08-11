@@ -539,3 +539,184 @@ class VideoToNumpy(nn.Module):
             result[key] = self.transform_tensor(result[key], **kwargs)
 
         return result
+
+
+"""
+- image_processor: Eagle2_5_VLImageProcessorFast {
+  "auto_map": {
+    "AutoImageProcessor": "image_processing_eagle2_5_vl_fast.Eagle2_5_VLImageProcessorFast",
+    "AutoProcessor": "processing_eagle2_5_vl.Eagle2_5_VLProcessor"
+  },
+  "crop_size": null,
+  "data_format": "channels_first",
+  "default_to_square": false,
+  "device": null,
+  "do_center_crop": null,
+  "do_convert_rgb": true,
+  "do_normalize": true,
+  "do_pad": false,
+  "do_rescale": true,
+  "do_resize": false,
+  "image_mean": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "image_processor_type": "Eagle2_5_VLImageProcessorFast",
+  "image_std": [
+    0.5,
+    0.5,
+    0.5
+  ],
+  "input_data_format": null,
+  "max_dynamic_tiles": 12,
+  "min_dynamic_tiles": 1,
+  "pad_during_tiling": false,
+  "processor_class": "Eagle2_5_VLProcessor",
+  "resample": 3,
+  "rescale_factor": 0.00392156862745098,
+  "return_tensors": null,
+  "size": {
+    "height": 224,
+    "width": 224
+  },
+  "tokens_per_tile": 256,
+  "use_thumbnail": true
+}"""
+
+
+class GR00TTransform(nn.Module):
+    """Exportable version of Eagle2Process."""
+
+    int_to_interpolation_string = {
+        0: 'nearest',    # PIL.Image.Resampling.NEAREST
+        1: 'lanczos',    # PIL.Image.Resampling.LANCZOS
+        2: 'bilinear',   # PIL.Image.Resampling.BILINEAR
+        3: 'bicubic',    # PIL.Image.Resampling.BICUBIC
+        4: 'box',        # PIL.Image.Resampling.BOX
+        5: 'hamming',    # PIL.Image.Resampling.HAMMING
+    }
+
+    def __init__(self, eagle_processor, **kwargs):
+        super().__init__()
+        configs = eagle_processor.__dict__['image_processor'].__dict__
+        self.interpolation = self.int_to_interpolation_string[configs['resample']]
+        if configs['size'] and configs['size']['height'] and configs['size']['width']:
+            self.size_tuple = (
+                configs['size']['height'], configs['size']['width'])
+        else:
+            self.size_tuple = (configs['size']['shortest_edge'],
+                               configs['size']['shortest_edge'])
+
+        if configs['crop_size'] and configs['crop_size']['height']:
+            self.tile_size = configs['crop_size']['height']
+        else:
+            self.tile_size = configs['size']['height']
+        self.size = configs['size']
+        self.use_thumbnail = configs['use_thumbnail']
+        self.pad_during_tiling = configs['pad_during_tiling']
+        self.do_resize = configs['do_resize']
+        self.do_center_crop = configs['do_center_crop']
+        self.do_rescale = configs['do_rescale']
+        self.do_normalize = configs['do_normalize']
+        self.rescale_factor = configs['rescale_factor']
+        self.image_mean = configs['image_mean']
+        self.image_std = configs['image_std']
+        self.return_tensors = configs['return_tensors']
+        self.do_pad = configs['do_pad']
+        self.min_dynamic_tiles = configs['min_dynamic_tiles']
+        self.max_dynamic_tiles = configs['max_dynamic_tiles']
+
+    def process_frames(self, data: torch.Tensor) -> torch.Tensor:
+        video = data
+
+        # Step 1: Normalize video dims - if 4D, unsqueeze until 6D [B, T, V, H, W, C]
+        # Add batch and view dimensions
+        while video.ndim < 6:
+            video = video.unsqueeze(0)
+
+        batch_size = video.shape[0]
+        if (batch_size != 1):
+            raise ValueError(
+                f"Batch size must be 1, got {batch_size}")
+
+        single_video = video.squeeze(0)
+
+        # Step 4: Flatten frames and convert CHW format for processing
+        v, t, h, w, c = single_video.shape
+        # convert to chw
+        single_video = single_video.permute(0, 1, 4, 2, 3)
+        # Flatten into frames: [V*T, C, H, W]
+        frames_chw = single_video.reshape(v * t, c, h, w)
+
+        processed_frames = list(torch.unbind(frames_chw, dim=0))
+
+        return processed_frames
+
+    def _get_image_patches(self, image: torch.Tensor) -> List[torch.Tensor]:
+        min_num = self.min_dynamic_tiles
+        max_num = self.max_dynamic_tiles
+        size = self.size_tuple
+        tile_size = self.tile_size
+        use_thumbnail = self.use_thumbnail
+        interpolation = self.interpolation
+        pad_during_tiling = self.pad_during_tiling
+
+    def forward(self, data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """In eval mode, just return the input.
+
+        Args:
+            data: Dictionary of video tensors
+            **kwargs: Additional keyword arguments
+        """
+        if not "video" in data:
+            return data
+
+        frames = self.process_frames(data['video'])
+        processed_frames = []
+
+        for frame in frames:
+            image_patches = self._get_image_patches(frame)
+
+            processed_image_patches_grouped = {}
+            grouped_image_patches, grouped_image_patches_index = self.group_images_by_shape(
+                image_patches
+            )
+
+            for shape, stacked_image_patches in grouped_image_patches.items():
+                if self.do_resize:
+                    stacked_image_patches = self.resize(
+                        image=stacked_image_patches,
+                        size=self.size,
+                        interpolation=self.interpolation,
+                    )
+                if self.do_center_crop:
+                    stacked_image_patches = self.center_crop(
+                        stacked_image_patches, self.tile_size)
+                # Fused rescale and normalize
+                stacked_image_patches = self.rescale_and_normalize(
+                    stacked_image_patches,
+                    self.do_rescale,
+                    self.rescale_factor,
+                    self.do_normalize,
+                    self.image_mean,
+                    self.image_std,
+                )
+                processed_image_patches_grouped[shape] = stacked_image_patches
+
+            processed_image_patches = self.reorder_images(
+                processed_image_patches_grouped, grouped_image_patches_index
+            )
+            if self.return_tensors:
+                processed_image_patches = torch.stack(
+                    processed_image_patches, dim=0)
+
+            processed_frames.append(processed_image_patches)
+
+        if self.do_pad:
+            processed_frames = self._pad_for_batching(processed_frames)
+
+        if self.return_tensors:
+            processed_frames = torch.cat(processed_frames, dim=0)
+
+        return processed_frames

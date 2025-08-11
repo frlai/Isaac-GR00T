@@ -23,12 +23,14 @@ def export_and_test_preprocess(data, policy, model_path):
     output_gr00t = get_input_info(policy, data)
     state_action_module = ComposedGr00tModule()
     video_module = ComposedGr00tModule()
+    eagle2_video_module = ComposedGr00tModule()
     for idx, preprocessing_step in enumerate(policy._modality_transform.transforms):
         params = preprocessing_step.__dict__
         # Get the class name of the preprocessing step
         step_class_name = preprocessing_step.__class__.__name__
         state_action_step = None
         video_step = None
+        eagle2_video_step = None
         # Import the corresponding export module class
         if "Video" in step_class_name:
             video_step = getattr(export_video, step_class_name)
@@ -40,6 +42,7 @@ def export_and_test_preprocess(data, policy, model_path):
         elif "GR00TTransform" in step_class_name:
             state_action_step = getattr(
                 export_gr00t_state_action, step_class_name)
+            eagle2_video_step = getattr(export_video, "GR00TTransform")
             metadata = {
                 'default_instruction': params['default_instruction'],
                 'embodiment_tag': params['embodiment_tag'].value,
@@ -66,6 +69,10 @@ def export_and_test_preprocess(data, policy, model_path):
                 f"Creating {step_class_name}export instance and adding to video module")
             video_module.add_module(
                 f"step_{idx}_{step_class_name}", video_step(**params))
+
+        if eagle2_video_step:
+            eagle2_video_module.add_module(
+                f"step_{idx}_{step_class_name}", eagle2_video_step(**params))
 
     # new requirement: convert the input to f32 required
     state_inputs = {k: v.to(torch.float32)
@@ -122,6 +129,8 @@ def export_and_test_preprocess(data, policy, model_path):
                                                     "output_format": output_format}}
     yaml.dump(describe_video_language_inputs, open(
         model_path+"/preprocess_video_language.yaml", "w"))
+
+    eagle2_video_output = eagle2_video_module(video_output)
 
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}
