@@ -32,7 +32,7 @@ from gr00t.data.dataset import LeRobotSingleDataset
 from gr00t.experiment.data_config import DATA_CONFIG_MAP
 from gr00t.model.backbone.eagle_backbone import DEFAULT_EAGLE_PATH, EagleBackbone
 from gr00t.model.policy import Gr00tPolicy, unsqueeze_dict_values
-
+from deployment_scripts.export_denoising_subgraph_onnx import export_denoising_subgraph
 
 def get_input_info(policy, observations):
     is_batch = policy._check_state_is_batched(observations)
@@ -430,6 +430,7 @@ def run_groot_inference(
         policy.model.backbone, policy.model.config.backbone_cfg, onnx_model_path, attention_mask
     )
     export_action_head(policy, onnx_model_path, state, attention_mask)
+    export_denoising_subgraph(policy, state, attention_mask, onnx_model_path)
 
     return predicted_action
 

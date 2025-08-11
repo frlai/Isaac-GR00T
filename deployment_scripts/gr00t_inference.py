@@ -19,7 +19,7 @@ from functools import partial
 
 import torch
 from action_head_utils import action_head_pytorch_forward
-from trt_model_forward import setup_tensorrt_engines
+from trt_model_forward import setup_tensorrt_engines, setup_denoising_subgraph_engine
 
 import gr00t
 from gr00t.data.dataset import LeRobotSingleDataset
@@ -166,6 +166,7 @@ if __name__ == "__main__":
 
     else:
         # ensure PyTorch and TensorRT have the same init_actions
+        torch.cuda.manual_seed(42)
         if not hasattr(policy.model.action_head, "init_actions"):
             policy.model.action_head.init_actions = torch.randn(
                 (1, policy.model.action_head.action_horizon, policy.model.action_head.action_dim),
@@ -180,6 +181,7 @@ if __name__ == "__main__":
 
         # Setup TensorRT engines and run inference
         setup_tensorrt_engines(policy, args.trt_engine_path)
+        #setup_denoising_subgraph_engine(policy, args.trt_engine_path)
         predicted_action_tensorrt = policy.get_action(step_data)
 
         # Compare predictions

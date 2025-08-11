@@ -61,3 +61,8 @@ trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTr
 # VLM-LLM
 echo "------------Building VLM-LLM--------------------"
 trtexec --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=gr00t_onnx/eagle2/llm.onnx  --saveEngine=gr00t_engine/llm.engine --minShapes=input_ids:1x${MIN_LEN},vit_embeds:1x256x1152,attention_mask:1x${MIN_LEN} --optShapes=input_ids:1x${OPT_LEN},vit_embeds:1x256x1152,attention_mask:1x${OPT_LEN} --maxShapes=input_ids:8x${MAX_LEN},vit_embeds:8x256x1152,attention_mask:8x${MAX_LEN} > gr00t_engine/llm.log 2>&1
+
+# Denoising Subgraph
+echo "------------Building Denoising Subgraph--------------------"
+trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=gr00t_onnx/denoising_subgraph.onnx --saveEngine=gr00t_engine/denoising_subgraph.engine --minShapes=embeddings:1x${MIN_LEN}x2048,state:1x1x64,embodiment_id:1  --optShapes=embeddings:1x${OPT_LEN}x2048,state:1x1x64,embodiment_id:1  --maxShapes=embeddings:8x${MAX_LEN}x2048,state:8x1x64,embodiment_id:8 > gr00t_engine/build_denoising_subgraph.log 2>&1
+

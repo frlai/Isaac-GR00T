@@ -102,6 +102,8 @@ def action_head_tensorrt_forward(self, backbone_output, action_input):
     num_steps = self.num_inference_timesteps
     dt = 1.0 / num_steps
 
+    print("denosing num_steps: ", num_steps)
+
     for t in range(num_steps):
         t_cont = t / float(num_steps)  # e.g. goes 0, 1/N, 2/N, ...
         t_discretized = int(t_cont * self.num_timestep_buckets)
@@ -145,6 +147,34 @@ def action_head_tensorrt_forward(self, backbone_output, action_input):
 
         # Update actions using euler integration.
         actions = actions + dt * pred_velocity
+    return BatchFeature(data={"action_pred": actions})
+
+
+def denoising_subgraph_tensorrt_forward(self, backbone_output, action_input):
+    """TensorRT forward using integrated denoising subgraph engine"""
+    # Process inputs to match denoising subgraph expectations
+    if backbone_output.backbone_features.dtype != torch.float16:
+        backbone_output.backbone_features = backbone_output.backbone_features.to(torch.float16)
+    
+    if action_input.state.dtype != torch.float16:
+        action_input.state = action_input.state.to(torch.float16)
+    
+    # Embodiment ID should be int32 for the ONNX model
+    embodiment_id = action_input.embodiment_id
+    if embodiment_id.dtype != torch.int32:
+        embodiment_id = embodiment_id.to(torch.int32)
+    
+    # Single engine call for the entire denoising pipeline
+    self.denoising_subgraph_engine.set_runtime_tensor_shape(
+        "embeddings", backbone_output.backbone_features.shape
+    )
+    self.denoising_subgraph_engine.set_runtime_tensor_shape("state", action_input.state.shape)
+    self.denoising_subgraph_engine.set_runtime_tensor_shape("embodiment_id", embodiment_id.shape)
+    
+    actions = self.denoising_subgraph_engine(
+        backbone_output.backbone_features, action_input.state, embodiment_id
+    )["actions"]
+    
     return BatchFeature(data={"action_pred": actions})
 
 
@@ -199,4 +229,55 @@ def setup_tensorrt_engines(policy, trt_engine_path):
     policy.model.backbone.forward = partial(eagle_tensorrt_forward, policy.model.backbone)
     policy.model.action_head.get_action = partial(
         action_head_tensorrt_forward, policy.model.action_head
+    )
+
+
+def setup_denoising_subgraph_engine(policy, trt_engine_path):
+    """
+    Setup TensorRT engines for GR00T model inference using integrated denoising subgraph.
+    
+    This replaces the multi-engine action head with a single denoising subgraph engine.
+    
+    Args:
+        policy: GR00T policy model instance
+        trt_engine_path: Path to TensorRT engines directory
+    """
+    policy.model.backbone.num_patches = (
+        policy.model.backbone.eagle_model.vision_model.vision_model.embeddings.num_patches
+    )
+    
+    # Clean up PyTorch modules that will be replaced by TensorRT engines
+    if hasattr(policy.model.backbone.eagle_model, "vision_model"):
+        del policy.model.backbone.eagle_model.vision_model
+    if hasattr(policy.model.backbone.eagle_model, "language_model"):
+        del policy.model.backbone.eagle_model.language_model
+    if hasattr(policy.model.action_head, "vlln"):
+        del policy.model.action_head.vlln
+    if hasattr(policy.model.action_head, "vl_self_attention"):
+        del policy.model.action_head.vl_self_attention
+    if hasattr(policy.model.action_head, "model"):
+        del policy.model.action_head.model
+    if hasattr(policy.model.action_head, "state_encoder"):
+        del policy.model.action_head.state_encoder
+    if hasattr(policy.model.action_head, "action_encoder"):
+        del policy.model.action_head.action_encoder
+    if hasattr(policy.model.action_head, "action_decoder"):
+        del policy.model.action_head.action_decoder
+    torch.cuda.empty_cache()
+
+    print("Denoising subgraph engine setup complete")
+
+    # Setup backbone engines (same as before)
+    policy.model.backbone.vit_engine = trt.Engine(os.path.join(trt_engine_path, "vit.engine"))
+    policy.model.backbone.llm_engine = trt.Engine(os.path.join(trt_engine_path, "llm.engine"))
+
+    # Setup single denoising subgraph engine (replaces all action head engines)
+    policy.model.action_head.denoising_subgraph_engine = trt.Engine(
+        os.path.join(trt_engine_path, "denoising_subgraph.engine")
+    )
+
+    # Set TensorRT forward functions
+    policy.model.backbone.forward = partial(eagle_tensorrt_forward, policy.model.backbone)
+    policy.model.action_head.get_action = partial(
+        denoising_subgraph_tensorrt_forward, policy.model.action_head
     )
