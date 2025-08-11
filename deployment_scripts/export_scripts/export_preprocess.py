@@ -24,7 +24,7 @@ def get_preprocessed_data(policy, observations):
     return retval
 
 
-def export_and_test_preprocess(data, policy, models_base_path):
+def export_and_test_preprocess(data, policy, model_path):
     # use different data to trace and test the model
     video_inputs, state_inputs, action_inputs, language_inputs = batch_tensorize_and_split(
         data)
@@ -57,7 +57,7 @@ def export_and_test_preprocess(data, policy, models_base_path):
                 'apply_to': params['apply_to'],
                 'formalize_language': params['formalize_language'],
             }
-            with open(os.path.join(models_base_path, "tokenizer_params.yaml"), "w") as f:
+            with open(os.path.join(model_path, "tokenizer_params.yaml"), "w") as f:
                 yaml.dump(metadata, f, default_flow_style=False)
         else:
             print(f"Unknown module type: {step_class_name}")
@@ -84,9 +84,9 @@ def export_and_test_preprocess(data, policy, models_base_path):
     traced_state_action_module = torch.jit.trace(
         state_action_module, state_inputs, strict=False)
     traced_state_action_module.save(os.path.join(
-        models_base_path, "preprocess_state_action.pt"))
+        model_path, "preprocess_state_action.pt"))
     traced_state_action_module = torch.jit.load(
-        os.path.join(models_base_path, "preprocess_state_action.pt"))
+        os.path.join(model_path, "preprocess_state_action.pt"))
 
     input_description, input_format = describe_io(state_inputs)
     state_action_output_export = traced_state_action_module(
@@ -97,14 +97,14 @@ def export_and_test_preprocess(data, policy, models_base_path):
                                                   "input_format": [input_format],
                                                   "output_format": output_format}}
     yaml.dump(describe_state_action_inputs, open(
-        models_base_path+"/preprocess_state_action.yaml", "w"))
+        model_path+"/preprocess_state_action.yaml", "w"))
 
     traced_video_module = torch.jit.trace(
         video_module, video_inputs, strict=False)
     traced_video_module.save(os.path.join(
-        models_base_path, "preprocess_video.pt"))
+        model_path, "preprocess_video.pt"))
     traced_video_module = torch.jit.load(
-        os.path.join(models_base_path, "preprocess_video.pt"))
+        os.path.join(model_path, "preprocess_video.pt"))
 
     input_description, input_format = describe_io(video_inputs)
     video_output = traced_video_module(video_inputs)
@@ -114,9 +114,9 @@ def export_and_test_preprocess(data, policy, models_base_path):
                                            "input_format": [input_format],
                                            "output_format": output_format}}
     yaml.dump(describe_video_inputs, open(
-        models_base_path+"/preprocess_video.yaml", "w"))
+        model_path+"/preprocess_video.yaml", "w"))
 
-    with open(os.path.join(models_base_path, "tokenizer_params.yaml"), "r") as f:
+    with open(os.path.join(model_path, "tokenizer_params.yaml"), "r") as f:
         tokenizer_params = yaml.load(f, Loader=yaml.FullLoader)
     video_language_module = export_gr00t_video_language.GR00TTransform(
         **tokenizer_params)
@@ -131,7 +131,7 @@ def export_and_test_preprocess(data, policy, models_base_path):
                                                     "input_format": [input_format],
                                                     "output_format": output_format}}
     yaml.dump(describe_video_language_inputs, open(
-        models_base_path+"/preprocess_video_language.yaml", "w"))
+        model_path+"/preprocess_video_language.yaml", "w"))
 
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}

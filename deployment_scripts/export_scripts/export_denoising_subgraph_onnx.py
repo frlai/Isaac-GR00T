@@ -16,16 +16,9 @@
 import os
 import torch
 import torch.nn as nn
-import argparse
-import gr00t
-from gr00t.model.policy import Gr00tPolicy, unsqueeze_dict_values
-from gr00t.experiment.data_config import DATA_CONFIG_MAP
-from gr00t.data.dataset import LeRobotSingleDataset
 import copy
 import onnx
 import onnxruntime as ort
-import numpy as np
-import time
 
 torch.manual_seed(42)
 if torch.cuda.is_available():
@@ -42,27 +35,32 @@ class StandaloneDenoisingSubgraph(nn.Module):
         dtype = torch.float16
 
         # Use the same direct conversion approach as individual exports
-        self.state_encoder = copy.deepcopy(policy.model.action_head.state_encoder)
+        self.state_encoder = copy.deepcopy(
+            policy.model.action_head.state_encoder)
         self.state_encoder = self.state_encoder.to(dtype).eval()
-        
-        self.action_encoder = copy.deepcopy(policy.model.action_head.action_encoder) 
+
+        self.action_encoder = copy.deepcopy(
+            policy.model.action_head.action_encoder)
         self.action_encoder = self.action_encoder.to(dtype).eval()
-        
-        self.action_decoder = copy.deepcopy(policy.model.action_head.action_decoder)
+
+        self.action_decoder = copy.deepcopy(
+            policy.model.action_head.action_decoder)
         self.action_decoder = self.action_decoder.to(dtype).eval()
-        
+
         self.dit_model = copy.deepcopy(policy.model.action_head.model)
         self.dit_model = self.dit_model.to(dtype).eval()
 
         # Use the SAME num_inference_timesteps as the individual TensorRT engines
         self.num_inference_timesteps = 4
-        print(f"ONNX Export - Using num_inference_timesteps={self.num_inference_timesteps}")
+        print(
+            f"ONNX Export - Using num_inference_timesteps={self.num_inference_timesteps}")
         self.num_timestep_buckets = policy.model.action_head.num_timestep_buckets
         self.action_horizon = policy.model.action_head.config.action_horizon
         self.action_dim = policy.model.action_head.config.action_dim
 
         if hasattr(policy.model.action_head, 'position_embedding') and policy.model.action_head.config.add_pos_embed:
-            self.position_embedding = copy.deepcopy(policy.model.action_head.position_embedding)
+            self.position_embedding = copy.deepcopy(
+                policy.model.action_head.position_embedding)
             self.position_embedding = self.position_embedding.to(dtype).eval()
             self.add_pos_embed = True
         else:
@@ -71,7 +69,7 @@ class StandaloneDenoisingSubgraph(nn.Module):
         # Get dimensions from policy configuration
         action_horizon = policy.model.action_head.config.action_horizon
         action_dim = policy.model.action_head.config.action_dim
-        
+
         init_actions_tensor = torch.randn(
             (1, action_horizon, action_dim),
             dtype=torch.float16, device="cuda"
@@ -89,7 +87,7 @@ class StandaloneDenoisingSubgraph(nn.Module):
         embeddings = embeddings.to(self.model_dtype)
 
         state_features = self.state_encoder(state, embodiment_id)
-        
+
         # Use the registered init_actions buffer
         actions = self.init_actions.expand(batch_size, -1, -1).clone()
 
@@ -188,34 +186,37 @@ def validate_model(model, onnx_path, embeddings, state, embodiment_id):
 
 def _create_synthetic_tensors(policy, input_state, attention_mask):
     """Helper function to create synthetic tensors - exact same as export_onnx.py"""
-    # Use the exact dimensions from export_onnx.py 
+    # Use the exact dimensions from export_onnx.py
     input_embedding_dim = policy.model.action_head.config.input_embedding_dim
-    
+
     print(f"Using dimensions exactly like export_onnx.py:")
-    print(f"  embeddings: (1, {attention_mask.shape[1]}, {input_embedding_dim})")
+    print(
+        f"  embeddings: (1, {attention_mask.shape[1]}, {input_embedding_dim})")
     print(f"  state: {input_state.shape}")
-    
-    embeddings = torch.randn((1, attention_mask.shape[1], input_embedding_dim), dtype=torch.float16, device="cuda")
-    state = torch.randn((1, input_state.shape[1], input_state.shape[2]), dtype=torch.float16, device="cuda") 
+
+    embeddings = torch.randn(
+        (1, attention_mask.shape[1], input_embedding_dim), dtype=torch.float16, device="cuda")
+    state = torch.randn(
+        (1, input_state.shape[1], input_state.shape[2]), dtype=torch.float16, device="cuda")
     embodiment_id = torch.ones((1), dtype=torch.int32, device="cuda")
-    
+
     return embeddings, state, embodiment_id
 
 
 def export_denoising_subgraph(policy, input_state, attention_mask, save_model_path):
     """Export denoising subgraph to ONNX with validation - same pattern as export_action_head
-    
+
     Args:
         policy: GR00T policy object
         input_state: Processed state tensor from get_input_info()
         attention_mask: Attention mask from get_input_info()
         save_model_path: Directory path (output will be save_model_path/denoising_subgraph.onnx)
-        
+
     Returns:
         bool: True if export and validation succeeded
     """
     print("Exporting denoising subgraph...")
-    
+
     # Set up policy model
     policy.model.to("cuda", dtype=torch.float16)
     policy.model.eval()
@@ -225,7 +226,8 @@ def export_denoising_subgraph(policy, input_state, attention_mask, save_model_pa
     model = StandaloneDenoisingSubgraph(policy).cuda().eval()
 
     # Create synthetic tensors using input_state and attention_mask dimensions
-    embeddings, state, embodiment_id = _create_synthetic_tensors(policy, input_state, attention_mask)
+    embeddings, state, embodiment_id = _create_synthetic_tensors(
+        policy, input_state, attention_mask)
 
     # Set output path
     output_path = os.path.join(save_model_path, "denoising_subgraph.onnx")
@@ -236,12 +238,10 @@ def export_denoising_subgraph(policy, input_state, attention_mask, save_model_pa
     # Always validate the exported model
     is_valid, ort_session = validate_model(
         model, output_path, embeddings, state, embodiment_id)
-    
+
     if is_valid:
         print("\nVALIDATION PASSED")
         return True
     else:
         print("\nVALIDATION FAILED")
         return False
-
-

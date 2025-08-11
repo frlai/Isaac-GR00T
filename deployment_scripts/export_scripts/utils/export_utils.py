@@ -312,6 +312,18 @@ def test_gr00t_process_consistency(output_export, output_gr00t):
     return success
 
 
+def get_input_info(policy, observations):
+    is_batch = policy._check_state_is_batched(observations)
+    if not is_batch:
+        observations = unsqueeze_dict_values(observations)
+
+    normalized_input = unsqueeze_dict_values
+    # Apply transforms
+    normalized_input = policy.apply_transforms(observations)
+
+    return normalized_input["eagle_attention_mask"], normalized_input["state"]
+
+
 class ComposedGr00tModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
