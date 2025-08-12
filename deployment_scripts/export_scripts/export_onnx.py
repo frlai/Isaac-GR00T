@@ -33,6 +33,7 @@ from gr00t.model.policy import Gr00tPolicy
 from export_scripts.utils.export_utils import get_input_info
 from export_scripts.export_denoising_subgraph_onnx import export_denoising_subgraph
 
+
 def export_eagle2_vit(vision_model, output_dir):
     class SiglipVisionEmbeddingsOpt(SiglipVisionEmbeddings):
         def __init__(self, config):
@@ -399,10 +400,9 @@ def export_onnx(
     os.makedirs(os.path.join(onnx_model_path, "eagle2"), exist_ok=True)
     os.makedirs(os.path.join(onnx_model_path, "action_head"), exist_ok=True)
 
-    #export_eagle2_vit(
-    #    policy.model.backbone.eagle_model.vision_model.vision_model, onnx_model_path)
-    #export_eagle2_llm(
-    #    policy.model.backbone, policy.model.config.backbone_cfg, onnx_model_path, attention_mask
-    #)
-    #export_action_head(policy, onnx_model_path, state, attention_mask)
-    export_denoising_subgraph(policy, state, attention_mask, onnx_model_path)
+    export_eagle2_vit(
+        policy.model.backbone.eagle_model.vision_model.vision_model, onnx_model_path)
+    export_eagle2_llm(
+        policy.model.backbone, policy.model.config.backbone_cfg, onnx_model_path, attention_mask
+    )
+    # export_action_head(policy, onnx_model_path, state, attention_mask)

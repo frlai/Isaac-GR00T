@@ -9,6 +9,7 @@ from gr00t.model.policy import Gr00tPolicy
 from export_scripts.export_onnx import export_onnx
 from export_scripts.export_preprocess import export_and_test_preprocess
 from export_scripts.export_postprocess import export_and_test_postprocess
+from export_scripts.export_denoising_subgraph_onnx import export_denoising_subgraph
 from export_scripts.utils.export_utils import get_input_info
 
 
@@ -70,11 +71,6 @@ if __name__ == "__main__":
 
     policy, dataset = get_policy_and_dataset(
         args.dataset_path, args.model_path)
-    export_onnx(
-        dataset=dataset,
-        policy=policy,
-        onnx_model_path=args.onnx_model_path,
-    )
 
     # export the preprocess model
     preprocess_model_path = os.path.join(
@@ -96,4 +92,19 @@ if __name__ == "__main__":
         data=dataset[0],
         policy=policy,
         model_path=postprocess_model_path,
+    )
+
+    export_onnx(
+        dataset=dataset,
+        policy=policy,
+        onnx_model_path=args.onnx_model_path,
+    )
+
+    attention_mask, state = get_input_info(policy, dataset[0])
+    export_denoising_subgraph(
+        policy=policy,
+        input_state=state,
+        attention_mask=attention_mask,
+        save_model_path=os.path.join(
+            args.onnx_model_path, "action_head"),
     )
