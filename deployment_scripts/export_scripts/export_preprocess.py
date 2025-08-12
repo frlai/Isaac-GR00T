@@ -13,6 +13,38 @@ from .utils.export_utils import get_input_info
 import os
 import yaml
 
+# import pickle
+# with open("/tmp/original.pkl", "wb") as f:
+#     pickle.dump(data, f)
+
+
+def test_gr00t_img_proc_step(data, tokenizer, video_transform):
+    scripted_video_transform = torch.jit.script(video_transform)
+    out = scripted_video_transform({"video": data['video']})
+    out = video_transform({"video": data['video']})
+    out = tokenizer(data)
+
+    try:
+        import pickle
+        import numpy as np
+        with open("/tmp/original.pkl", "rb") as f:
+            original = pickle.load(f)
+        with open("/tmp/new.pkl", "rb") as f:
+            new = pickle.load(f)
+
+        ot1 = original
+        new = new.to('cpu')
+
+        print("original shape: ", ot1.shape)
+        print("new shape: ", new.shape)
+
+        diff = (new - ot1).abs()
+        print(diff.max())
+    except Exception as e:
+        print(e)
+    import pdb
+    pdb.set_trace()
+
 
 def export_and_test_preprocess(data, policy, model_path):
     # use different data to trace and test the model
@@ -71,8 +103,7 @@ def export_and_test_preprocess(data, policy, model_path):
                 f"step_{idx}_{step_class_name}", video_step(**params))
 
         if eagle2_video_step:
-            eagle2_video_module.add_module(
-                f"step_{idx}_{step_class_name}", eagle2_video_step(**params))
+            eagle2_video_module = eagle2_video_step(**params)
 
     # new requirement: convert the input to f32 required
     state_inputs = {k: v.to(torch.float32)
@@ -130,7 +161,8 @@ def export_and_test_preprocess(data, policy, model_path):
     yaml.dump(describe_video_language_inputs, open(
         model_path+"/preprocess_video_language.yaml", "w"))
 
-    eagle2_video_output = eagle2_video_module(video_output)
+    test_gr00t_img_proc_step(video_language_inputs,
+                             video_language_module, eagle2_video_module)
 
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}

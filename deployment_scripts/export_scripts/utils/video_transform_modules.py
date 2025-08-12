@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
 import torchvision.transforms.v2 as T
+
+from torchvision.transforms.v2 import functional as F
+from torchvision.transforms import InterpolationMode
+
 from einops import rearrange
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 
 class VideoBase(nn.Module):
@@ -589,12 +593,12 @@ class GR00TTransform(nn.Module):
     """Exportable version of Eagle2Process."""
 
     int_to_interpolation_string = {
-        0: 'nearest',    # PIL.Image.Resampling.NEAREST
-        1: 'lanczos',    # PIL.Image.Resampling.LANCZOS
-        2: 'bilinear',   # PIL.Image.Resampling.BILINEAR
-        3: 'bicubic',    # PIL.Image.Resampling.BICUBIC
-        4: 'box',        # PIL.Image.Resampling.BOX
-        5: 'hamming',    # PIL.Image.Resampling.HAMMING
+        0: InterpolationMode.NEAREST,    # PIL.Image.Resampling.NEAREST
+        1: InterpolationMode.LANCZOS,    # PIL.Image.Resampling.LANCZOS
+        2: InterpolationMode.BILINEAR,   # PIL.Image.Resampling.BILINEAR
+        3: InterpolationMode.BICUBIC,    # PIL.Image.Resampling.BICUBIC
+        4: InterpolationMode.BOX,        # PIL.Image.Resampling.BOX
+        5: InterpolationMode.HAMMING,    # PIL.Image.Resampling.HAMMING
     }
 
     def __init__(self, eagle_processor, **kwargs):
@@ -627,7 +631,7 @@ class GR00TTransform(nn.Module):
         self.min_dynamic_tiles = configs['min_dynamic_tiles']
         self.max_dynamic_tiles = configs['max_dynamic_tiles']
 
-    def process_frames(self, data: torch.Tensor) -> torch.Tensor:
+    def process_frames(self, data: torch.Tensor) -> List[torch.Tensor]:
         video = data
 
         # Step 1: Normalize video dims - if 4D, unsqueeze until 6D [B, T, V, H, W, C]
@@ -653,7 +657,67 @@ class GR00TTransform(nn.Module):
 
         return processed_frames
 
-    def _get_image_patches(self, image: torch.Tensor) -> List[torch.Tensor]:
+    def _find_closest_aspect_ratio(
+        self,
+        aspect_ratio: float,
+        target_ratios: List[Tuple[int, int]],
+        orig_width: int,
+        orig_height: int,
+        tile_size: int
+    ) -> Tuple[int, int]:
+        """Find the closest aspect ratio considering both ratio and area."""
+        best_factor = -1.0
+        best_ratio = (1, 1)
+        area = orig_width * orig_height
+
+        for ratio in target_ratios:
+            target_aspect_ratio = float(ratio[0]) / float(ratio[1])
+
+            # Calculate factor based on area and ratio
+            factor_based_on_area_n_ratio = min(
+                float(ratio[0] * ratio[1] * tile_size *
+                      tile_size) / float(area), 0.6
+            ) * min(target_aspect_ratio / aspect_ratio, aspect_ratio / target_aspect_ratio)
+
+            if factor_based_on_area_n_ratio > best_factor:
+                best_factor = factor_based_on_area_n_ratio
+                best_ratio = ratio
+
+        return best_ratio
+
+    def _get_patch_output_size(self, target_resolution: Tuple[int, int],
+                               original_height: int, original_width: int) -> Tuple[int, int]:
+        """
+        Calculate output size when resizing image to target resolution while preserving aspect ratio.
+        Assumes channel-first format: [C, H, W] or [B, C, H, W].
+
+        Args:
+            image: Input image tensor in channel-first format
+            target_resolution: Tuple of (target_height, target_width)
+            original_height: Optional original height, if not provided will extract from image
+            original_width: Optional original width, if not provided will extract from image
+
+        Returns:
+            Tuple of (new_height, new_width) - the calculated output dimensions
+        """
+
+        target_height, target_width = target_resolution
+
+        scale_w = float(target_width) / float(original_width)
+        scale_h = float(target_height) / float(original_height)
+
+        if scale_w < scale_h:
+            new_width = target_width
+            new_height = min(
+                int(torch.ceil(torch.tensor(original_height * scale_w)).item()), target_height)
+        else:
+            new_height = target_height
+            new_width = min(
+                int(torch.ceil(torch.tensor(original_width * scale_h)).item()), target_width)
+
+        return new_height, new_width
+
+    def _get_image_patches(self, image: torch.Tensor) -> None:
         min_num = self.min_dynamic_tiles
         max_num = self.max_dynamic_tiles
         size = self.size_tuple
@@ -662,7 +726,50 @@ class GR00TTransform(nn.Module):
         interpolation = self.interpolation
         pad_during_tiling = self.pad_during_tiling
 
-    def forward(self, data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        orig_height = int(image.shape[-2])
+        orig_width = int(image.shape[-1])
+        aspect_ratio = float(orig_width) / float(orig_height)
+
+        # calculate the existing image aspect ratio
+        # Calculate target ratios efficiently (avoiding duplicates)
+        target_ratios: List[Tuple[int, int]] = []
+        for i in range(1, max_num + 1):
+            for j in range(1, max_num + 1):
+                total_tiles = i * j
+                if min_num <= total_tiles <= max_num:
+                    target_ratios.append((i, j))
+
+        # find the closest aspect ratio to the target
+        target_aspect_ratio = self._find_closest_aspect_ratio(
+            aspect_ratio, target_ratios, orig_width, orig_height, tile_size
+        )
+        # calculate the target width and height
+        target_width = int(tile_size * target_aspect_ratio[0])
+        target_height = int(tile_size * target_aspect_ratio[1])
+        blocks = target_aspect_ratio[0] * target_aspect_ratio[1]
+
+        if pad_during_tiling:
+            new_height, new_width = self._get_patch_output_size(
+                (target_height, target_width), orig_height, orig_width)
+            resized_image = F.resize(
+                image, [new_height, new_width], interpolation=interpolation
+            )
+            paste_x = (target_width - new_width) // 2
+            paste_y = (target_height - new_height) // 2
+            padded_image = F.pad(resized_image, padding=[
+                                 paste_x, paste_y, paste_x, paste_y])
+            image_used_to_split = padded_image
+        else:
+            image_used_to_split = F.resize(
+                image, [target_height, target_width], interpolation=interpolation
+            )
+        # import pickle
+        # with open("/tmp/new.pkl", "wb") as f:
+        #     pickle.dump(image_used_to_split, f)
+
+        # return image_used_to_split
+
+    def forward(self, data: Dict[str, torch.Tensor]) -> List[torch.Tensor]:
         """In eval mode, just return the input.
 
         Args:
@@ -670,53 +777,54 @@ class GR00TTransform(nn.Module):
             **kwargs: Additional keyword arguments
         """
         if not "video" in data:
-            return data
+            return []
 
         frames = self.process_frames(data['video'])
         processed_frames = []
 
         for frame in frames:
-            image_patches = self._get_image_patches(frame)
+            self._get_image_patches(frame)
+            # image_patches = self._get_image_patches(frame)
 
-            processed_image_patches_grouped = {}
-            grouped_image_patches, grouped_image_patches_index = self.group_images_by_shape(
-                image_patches
-            )
+            # processed_image_patches_grouped = {}
+            # grouped_image_patches, grouped_image_patches_index = self.group_images_by_shape(
+            #     image_patches
+            # )
 
-            for shape, stacked_image_patches in grouped_image_patches.items():
-                if self.do_resize:
-                    stacked_image_patches = self.resize(
-                        image=stacked_image_patches,
-                        size=self.size,
-                        interpolation=self.interpolation,
-                    )
-                if self.do_center_crop:
-                    stacked_image_patches = self.center_crop(
-                        stacked_image_patches, self.tile_size)
-                # Fused rescale and normalize
-                stacked_image_patches = self.rescale_and_normalize(
-                    stacked_image_patches,
-                    self.do_rescale,
-                    self.rescale_factor,
-                    self.do_normalize,
-                    self.image_mean,
-                    self.image_std,
-                )
-                processed_image_patches_grouped[shape] = stacked_image_patches
+            # for shape, stacked_image_patches in grouped_image_patches.items():
+            #     if self.do_resize:
+            #         stacked_image_patches = self.resize(
+            #             image=stacked_image_patches,
+            #             size=self.size,
+            #             interpolation=self.interpolation,
+            #         )
+            #     if self.do_center_crop:
+            #         stacked_image_patches = self.center_crop(
+            #             stacked_image_patches, self.tile_size)
+            #     # Fused rescale and normalize
+            #     stacked_image_patches = self.rescale_and_normalize(
+            #         stacked_image_patches,
+            #         self.do_rescale,
+            #         self.rescale_factor,
+            #         self.do_normalize,
+            #         self.image_mean,
+            #         self.image_std,
+            #     )
+            #     processed_image_patches_grouped[shape] = stacked_image_patches
 
-            processed_image_patches = self.reorder_images(
-                processed_image_patches_grouped, grouped_image_patches_index
-            )
-            if self.return_tensors:
-                processed_image_patches = torch.stack(
-                    processed_image_patches, dim=0)
+            # processed_image_patches = self.reorder_images(
+            #     processed_image_patches_grouped, grouped_image_patches_index
+            # )
+            # if self.return_tensors:
+            #     processed_image_patches = torch.stack(
+            #         processed_image_patches, dim=0)
 
-            processed_frames.append(processed_image_patches)
+            # processed_frames.append(processed_image_patches)
 
-        if self.do_pad:
-            processed_frames = self._pad_for_batching(processed_frames)
+        # if self.do_pad:
+        #     processed_frames = self._pad_for_batching(processed_frames)
 
-        if self.return_tensors:
-            processed_frames = torch.cat(processed_frames, dim=0)
+        # if self.return_tensors:
+        #     processed_frames = torch.cat(processed_frames, dim=0)
 
         return processed_frames
