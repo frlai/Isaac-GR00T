@@ -172,7 +172,7 @@ def export_model(model, embeddings, state, embodiment_id, output_path):
         input_names=["embeddings", "state", "embodiment_id"],
         output_names=["actions"],
         dynamic_axes={
-            "embeddings": {0: "batch_size", 1: "sequence_length"},
+            "embeddings": {0: "batch_size"},
             "state": {0: "batch_size"},
             "embodiment_id": {0: "batch_size"},
             "actions": {0: "batch_size"}
