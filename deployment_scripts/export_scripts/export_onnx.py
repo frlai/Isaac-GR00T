@@ -393,8 +393,11 @@ def export_onnx(
 ) -> Dict[str, float]:
 
     step_data = dataset[0]
+    import pdb
+    pdb.set_trace()
 
-    attention_mask, state = get_input_info(policy, step_data)
+    inputs = get_input_info(policy, step_data)
+    attention_mask = inputs["eagle_attention_mask"]
     # export onnx
     os.makedirs(onnx_model_path, exist_ok=True)
     os.makedirs(os.path.join(onnx_model_path, "eagle2"), exist_ok=True)
