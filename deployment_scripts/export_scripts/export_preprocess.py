@@ -125,11 +125,6 @@ def export_and_test_preprocess(data, policy, model_path):
 
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}
-    for k, v in output_export.items():
-        print(k, v.dtype, v.shape)
-    print("--------------------------------\n\n")
-    import pdb
-    pdb.set_trace()
 
     return test_gr00t_process_consistency(output_export, output_gr00t)
 

@@ -393,8 +393,6 @@ def export_onnx(
 ) -> Dict[str, float]:
 
     step_data = dataset[0]
-    import pdb
-    pdb.set_trace()
 
     inputs = get_input_info(policy, step_data)
     attention_mask = inputs["eagle_attention_mask"]
