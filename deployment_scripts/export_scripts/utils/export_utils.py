@@ -4,7 +4,7 @@ import numpy as np
 
 
 # Helper functions
-def unsqueeze_dict_values(data):
+def unsqueeze_dict_values(data: dict[str, any]) -> dict[str, any]:
     """
     Unsqueeze the values of a dictionary.
     This converts the data to be batched of size 1.
@@ -13,6 +13,8 @@ def unsqueeze_dict_values(data):
     for k, v in data.items():
         if isinstance(v, np.ndarray):
             unsqueezed_data[k] = np.expand_dims(v, axis=0)
+        elif isinstance(v, list):
+            unsqueezed_data[k] = np.array(v)
         elif isinstance(v, torch.Tensor):
             unsqueezed_data[k] = v.unsqueeze(0)
         else:
@@ -191,16 +193,6 @@ def verify_preprocess(output_export, output_gr00t, name):
     return success
 
 
-def get_preprocessed_data(policy, step_data: dict):
-    model_inputs = policy.get_preprocessed_data(step_data)
-    d_backbone_inputs, d_action_inputs = policy.model.prepare_input(
-        model_inputs)
-    d_backbone_inputs = dict(d_backbone_inputs)
-    d_action_inputs = dict(d_action_inputs)
-
-    return d_backbone_inputs, d_action_inputs  # d_backbone_output
-
-
 def test_export(original_model, exported_model, *args,
                 network_accuracy_test=True,
                 network_consistency_test=5,
@@ -317,11 +309,9 @@ def get_input_info(policy, observations):
     if not is_batch:
         observations = unsqueeze_dict_values(observations)
 
-    normalized_input = unsqueeze_dict_values
     # Apply transforms
     normalized_input = policy.apply_transforms(observations)
-
-    return normalized_input["eagle_attention_mask"], normalized_input["state"]
+    return normalized_input
 
 
 class ComposedGr00tModule(torch.nn.Module):

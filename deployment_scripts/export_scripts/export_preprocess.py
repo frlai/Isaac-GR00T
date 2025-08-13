@@ -9,19 +9,9 @@ import copy
 from .utils.export_utils import batch_tensorize_and_split
 from .utils.export_utils import ComposedGr00tModule
 from .utils.export_utils import describe_io, test_gr00t_process_consistency
+from .utils.export_utils import get_input_info
 import os
 import yaml
-
-
-def get_preprocessed_data(policy, observations):
-    from gr00t.model.policy import unsqueeze_dict_values
-
-    # let the get_action handles both batch and single input
-    is_batch = policy._check_state_is_batched(observations)
-    if not is_batch:
-        observations = unsqueeze_dict_values(observations)
-    retval = policy.apply_transforms(observations)
-    return retval
 
 
 def export_and_test_preprocess(data, policy, model_path):
@@ -30,7 +20,7 @@ def export_and_test_preprocess(data, policy, model_path):
         data)
     output_gr00t = dict(data)
 
-    output_gr00t = get_preprocessed_data(policy, data)
+    output_gr00t = get_input_info(policy, data)
     state_action_module = ComposedGr00tModule()
     video_module = ComposedGr00tModule()
     for idx, preprocessing_step in enumerate(policy._modality_transform.transforms):
@@ -135,6 +125,11 @@ def export_and_test_preprocess(data, policy, model_path):
 
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}
+    for k, v in output_export.items():
+        print(k, v.dtype, v.shape)
+    print("--------------------------------\n\n")
+    import pdb
+    pdb.set_trace()
 
     return test_gr00t_process_consistency(output_export, output_gr00t)
 
