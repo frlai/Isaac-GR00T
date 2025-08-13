@@ -93,7 +93,6 @@ class StandaloneDenoisingSubgraph(nn.Module):
             (1, action_horizon, action_dim),
             dtype=torch.float16, device="cuda"
         )
-        print("init_actions_tensor: ", init_actions_tensor)
         self.register_buffer('init_actions', init_actions_tensor)
 
         self.model_dtype = dtype
