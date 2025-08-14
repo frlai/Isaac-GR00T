@@ -3,6 +3,7 @@ from .utils import state_action_transform_modules as export_state_action
 from .utils import concat_transform_modules as export_concat
 from .utils import gr00t_transform_modules as export_gr00t_state_action
 from .utils import gr00t_tokenizer as export_gr00t_video_language
+from .utils import video_language_transfrom_module as export_eagle2_video_language
 
 import torch
 import copy
@@ -12,47 +13,6 @@ from .utils.export_utils import describe_io, test_gr00t_process_consistency
 from .utils.export_utils import get_input_info
 import os
 import yaml
-
-# import pickle
-# with open("/tmp/original.pkl", "wb") as f:
-#     pickle.dump(data, f)
-
-
-def test_gr00t_img_proc_step(data, tokenizer, video_transform):
-    scripted_video_transform = torch.jit.script(video_transform)
-    video_transform_out = scripted_video_transform({"video": data['video']})
-    torch.jit.save(scripted_video_transform, "video_transform.pt")
-    scripted_video_transform = torch.jit.load("video_transform.pt")
-    video_transform_out = scripted_video_transform({"video": data['video']})
-    tokenizer_out = tokenizer(data)
-
-    # try:
-    #     import pickle
-    #     import numpy as np
-    #     with open("/tmp/original.pkl", "rb") as f:
-    #         original = pickle.load(f)
-    #     with open("/tmp/new.pkl", "rb") as f:
-    #         new = pickle.load(f)
-
-    #     ot_im, ot_sz = original[0][0], original[1]
-    #     ne_im, ne_sz = new[0][0].to('cpu'), new[1]
-
-    #     # print("original shape: ", ot_im.shape)
-    #     # print("new shape: ", ne.shape)
-
-    #     diff = (ne_im - ot_im).abs()
-    #     print(diff.max())
-    # except Exception as e:
-    #     print(e)
-    tokenizer_eagle_pixel_values = tokenizer_out['eagle_pixel_values']
-    video_transform_eagle_pixel_values = video_transform_out['eagle_pixel_values']
-    diff = (tokenizer_eagle_pixel_values.to('cpu') -
-            video_transform_eagle_pixel_values.to('cpu')).abs()
-    print(diff.max())
-    print(tokenizer_out['eagle_image_sizes'])
-    print(video_transform_out['eagle_image_sizes'])
-    import pdb
-    pdb.set_trace()
 
 
 def export_and_test_preprocess(data, policy, model_path):
@@ -83,7 +43,8 @@ def export_and_test_preprocess(data, policy, model_path):
         elif "GR00TTransform" in step_class_name:
             state_action_step = getattr(
                 export_gr00t_state_action, step_class_name)
-            eagle2_video_step = getattr(export_video, "GR00TTransform")
+            eagle2_video_step = getattr(
+                export_eagle2_video_language, "Eagle2VideoTransform")
             metadata = {
                 'default_instruction': params['default_instruction'],
                 'embodiment_tag': params['embodiment_tag'].value,
@@ -112,7 +73,9 @@ def export_and_test_preprocess(data, policy, model_path):
                 f"step_{idx}_{step_class_name}", video_step(**params))
 
         if eagle2_video_step:
-            eagle2_video_module = eagle2_video_step(**params)
+            from .utils.video_language_transfrom_module import Gr00tVideoLanguageTransform
+            eagle2_tokenizer = Gr00tVideoLanguageTransform(**params)
+            eagle2_tokenizer.set_gr00t_transform_outputs(output_gr00t)
 
     # new requirement: convert the input to f32 required
     state_inputs = {k: v.to(torch.float32)
@@ -153,16 +116,17 @@ def export_and_test_preprocess(data, policy, model_path):
     yaml.dump(describe_video_inputs, open(
         model_path+"/preprocess_video.yaml", "w"))
 
+    video_language_inputs = {**video_output, **language_inputs}
+
     with open(os.path.join(model_path, "tokenizer_params.yaml"), "r") as f:
         tokenizer_params = yaml.load(f, Loader=yaml.FullLoader)
     video_language_module = export_gr00t_video_language.GR00TTransform(
         **tokenizer_params)
 
-    video_language_inputs = {**video_output, **language_inputs}
     input_description, input_format = describe_io(video_language_inputs)
 
-    video_language_output = video_language_module(video_language_inputs)
-    output_description, output_format = describe_io(video_language_output)
+    python_gr00t_output = video_language_module(video_language_inputs)
+    output_description, output_format = describe_io(python_gr00t_output)
     describe_video_language_inputs = {"inference": {"input_nodes": input_description,
                                                     "output_nodes": output_description,
                                                     "input_format": [input_format],
@@ -170,13 +134,29 @@ def export_and_test_preprocess(data, policy, model_path):
     yaml.dump(describe_video_language_inputs, open(
         model_path+"/preprocess_video_language.yaml", "w"))
 
-    test_gr00t_img_proc_step(video_language_inputs,
-                             video_language_module, eagle2_video_module)
+    scripted_module = torch.jit.script(eagle2_tokenizer)
+    scripted_module.save(os.path.join(
+        model_path, "eagle2_tokenizer.pt"))
+    scripted_module = torch.jit.load(os.path.join(
+        model_path, "eagle2_tokenizer.pt"))
+    input_description, input_format = describe_io(video_output)
+    video_language_output = scripted_module(video_output)
+    output_description, output_format = describe_io(video_language_output)
+    describe_video_outputs = {"inference": {"input_nodes": input_description,
+                                            "output_nodes": output_description,
+                                            "input_format": [input_format],
+                                            "output_format": output_format}}
+    yaml.dump(describe_video_outputs, open(
+        model_path+"/eagle2_tokenizer.yaml", "w"))
 
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}
+    output_python_tokenizer = {
+        **state_action_output_export, **python_gr00t_output}
 
-    return test_gr00t_process_consistency(output_export, output_gr00t)
+    print("testing both implementations of the tokenizer")
+    return (test_gr00t_process_consistency(output_export, output_gr00t) and
+            test_gr00t_process_consistency(output_python_tokenizer, output_gr00t))
 
 
 if __name__ == "__main__":
