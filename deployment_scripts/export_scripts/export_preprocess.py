@@ -20,28 +20,37 @@ import yaml
 
 def test_gr00t_img_proc_step(data, tokenizer, video_transform):
     scripted_video_transform = torch.jit.script(video_transform)
-    out = scripted_video_transform({"video": data['video']})
-    out = video_transform({"video": data['video']})
-    out = tokenizer(data)
+    video_transform_out = scripted_video_transform({"video": data['video']})
+    torch.jit.save(scripted_video_transform, "video_transform.pt")
+    scripted_video_transform = torch.jit.load("video_transform.pt")
+    video_transform_out = scripted_video_transform({"video": data['video']})
+    tokenizer_out = tokenizer(data)
 
-    try:
-        import pickle
-        import numpy as np
-        with open("/tmp/original.pkl", "rb") as f:
-            original = pickle.load(f)
-        with open("/tmp/new.pkl", "rb") as f:
-            new = pickle.load(f)
+    # try:
+    #     import pickle
+    #     import numpy as np
+    #     with open("/tmp/original.pkl", "rb") as f:
+    #         original = pickle.load(f)
+    #     with open("/tmp/new.pkl", "rb") as f:
+    #         new = pickle.load(f)
 
-        ot1 = original
-        new = new.to('cpu')
+    #     ot_im, ot_sz = original[0][0], original[1]
+    #     ne_im, ne_sz = new[0][0].to('cpu'), new[1]
 
-        print("original shape: ", ot1.shape)
-        print("new shape: ", new.shape)
+    #     # print("original shape: ", ot_im.shape)
+    #     # print("new shape: ", ne.shape)
 
-        diff = (new - ot1).abs()
-        print(diff.max())
-    except Exception as e:
-        print(e)
+    #     diff = (ne_im - ot_im).abs()
+    #     print(diff.max())
+    # except Exception as e:
+    #     print(e)
+    tokenizer_eagle_pixel_values = tokenizer_out['eagle_pixel_values']
+    video_transform_eagle_pixel_values = video_transform_out['eagle_pixel_values']
+    diff = (tokenizer_eagle_pixel_values.to('cpu') -
+            video_transform_eagle_pixel_values.to('cpu')).abs()
+    print(diff.max())
+    print(tokenizer_out['eagle_image_sizes'])
+    print(video_transform_out['eagle_image_sizes'])
     import pdb
     pdb.set_trace()
 

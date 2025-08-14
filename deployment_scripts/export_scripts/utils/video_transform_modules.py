@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn as nn
 import torchvision.transforms.v2 as T
@@ -619,14 +620,13 @@ class GR00TTransform(nn.Module):
         self.size = configs['size']
         self.use_thumbnail = configs['use_thumbnail']
         self.pad_during_tiling = configs['pad_during_tiling']
-        self.do_resize = configs['do_resize']
-        self.do_center_crop = configs['do_center_crop']
-        self.do_rescale = configs['do_rescale']
-        self.do_normalize = configs['do_normalize']
+        self.do_resize = configs['do_resize'] if configs['do_resize'] else False
+        self.do_center_crop = configs['do_center_crop'] if configs['do_center_crop'] else False
+        self.do_rescale = configs['do_rescale'] if configs['do_rescale'] else False
+        self.do_normalize = configs['do_normalize'] if configs['do_normalize'] else False
         self.rescale_factor = configs['rescale_factor']
         self.image_mean = configs['image_mean']
         self.image_std = configs['image_std']
-        self.return_tensors = configs['return_tensors']
         self.do_pad = configs['do_pad']
         self.min_dynamic_tiles = configs['min_dynamic_tiles']
         self.max_dynamic_tiles = configs['max_dynamic_tiles']
@@ -717,10 +717,20 @@ class GR00TTransform(nn.Module):
 
         return new_height, new_width
 
-    def _get_image_patches(self, image: torch.Tensor) -> None:
+    def _crop(self, img: torch.Tensor, left: int, top: int, right: int, bottom: int) -> torch.Tensor:
+        img_height = img.shape[1]
+        img_width = img.shape[2]
+        if top < 0 or left < 0 or bottom > img_height or right > img_width:
+            raise ValueError("Crop coordinates out of bounds")
+
+        if top >= bottom or left >= right:
+            raise ValueError("Invalid crop coordinates")
+
+        return img[:, top:bottom, left:right]
+
+    def _get_image_patches(self, image: torch.Tensor) -> List[torch.Tensor]:
         min_num = self.min_dynamic_tiles
         max_num = self.max_dynamic_tiles
-        size = self.size_tuple
         tile_size = self.tile_size
         use_thumbnail = self.use_thumbnail
         interpolation = self.interpolation
@@ -763,68 +773,240 @@ class GR00TTransform(nn.Module):
             image_used_to_split = F.resize(
                 image, [target_height, target_width], interpolation=interpolation
             )
-        # import pickle
-        # with open("/tmp/new.pkl", "wb") as f:
-        #     pickle.dump(image_used_to_split, f)
+        processed_tiles = []
+        for i in range(blocks):
+            box = (
+                (i % (target_width // tile_size)) * tile_size,
+                (i // (target_width // tile_size)) * tile_size,
+                ((i % (target_width // tile_size)) + 1) * tile_size,
+                ((i // (target_width // tile_size)) + 1) * tile_size,
+            )
+            # split the image
+            split_img = self._crop(image_used_to_split,
+                                   box[0], box[1], box[2], box[3])
+            processed_tiles.append(split_img)
 
-        # return image_used_to_split
+        if use_thumbnail and len(processed_tiles) != 1:
+            thumbnail_img = F.resize(
+                image, (tile_size, tile_size), interpolation=interpolation)
+            processed_tiles.append(thumbnail_img)
+        return processed_tiles
 
-    def forward(self, data: Dict[str, torch.Tensor]) -> List[torch.Tensor]:
+    def _pad_for_batching(
+        self,
+        pixel_values: List[torch.Tensor],
+    ) -> List[torch.Tensor]:
+        """
+        Pads images on the `num_of_patches` dimension with zeros to form a batch of same number of patches.
+
+        Args:
+            pixel_values (`List[torch.Tensor]`):
+                An array of pixel values of each images of shape (`batch_size`, `num_patches`, `image_in_3D`)
+
+        Returns:
+            List[`torch.Tensor`]: The padded images.
+        """
+        max_patch = max(len(x) for x in pixel_values)
+        pixel_values = [
+            torch.nn.functional.pad(
+                image, pad=[0, 0, 0, 0, 0, 0, 0, max_patch - image.shape[0]])
+            for image in pixel_values
+        ]
+
+        return pixel_values
+
+    def forward(self, data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """In eval mode, just return the input.
 
         Args:
             data: Dictionary of video tensors
             **kwargs: Additional keyword arguments
         """
-        if not "video" in data:
-            return []
+        if "video" not in data:
+            return {}
 
         frames = self.process_frames(data['video'])
+        image_sizes = []
         processed_frames = []
 
         for frame in frames:
-            self._get_image_patches(frame)
-            # image_patches = self._get_image_patches(frame)
+            if frame.ndim != 3:
+                raise ValueError(
+                    "Frame must be 3D, got " + str(frame.ndim) + "D")
 
-            # processed_image_patches_grouped = {}
-            # grouped_image_patches, grouped_image_patches_index = self.group_images_by_shape(
-            #     image_patches
-            # )
+            image_patches = self._get_image_patches(frame)
 
-            # for shape, stacked_image_patches in grouped_image_patches.items():
-            #     if self.do_resize:
-            #         stacked_image_patches = self.resize(
-            #             image=stacked_image_patches,
-            #             size=self.size,
-            #             interpolation=self.interpolation,
-            #         )
-            #     if self.do_center_crop:
-            #         stacked_image_patches = self.center_crop(
-            #             stacked_image_patches, self.tile_size)
-            #     # Fused rescale and normalize
-            #     stacked_image_patches = self.rescale_and_normalize(
-            #         stacked_image_patches,
-            #         self.do_rescale,
-            #         self.rescale_factor,
-            #         self.do_normalize,
-            #         self.image_mean,
-            #         self.image_std,
-            #     )
-            #     processed_image_patches_grouped[shape] = stacked_image_patches
+            processed_image_patches_grouped = {}
+            grouped_image_patches, grouped_image_patches_index = self.group_images_by_shape(
+                image_patches
+            )
 
-            # processed_image_patches = self.reorder_images(
-            #     processed_image_patches_grouped, grouped_image_patches_index
-            # )
-            # if self.return_tensors:
-            #     processed_image_patches = torch.stack(
-            #         processed_image_patches, dim=0)
+            for shape, stacked_image_patches in grouped_image_patches.items():
+                if self.do_resize:
+                    target_size = (self.size['height'], self.size['width'])
+                    stacked_image_patches = F.resize(
+                        stacked_image_patches, target_size, interpolation=self.interpolation
+                    )
+                if self.do_center_crop:
+                    stacked_image_patches = F.center_crop(
+                        stacked_image_patches, (self.tile_size, self.tile_size)
+                    )
 
-            # processed_frames.append(processed_image_patches)
+                # Fused rescale and normalize
+                stacked_image_patches = self.rescale_and_normalize(
+                    stacked_image_patches,
+                    self.do_rescale,
+                    self.rescale_factor,
+                    self.do_normalize,
+                    self.image_mean,
+                    self.image_std,
+                )
+                processed_image_patches_grouped[shape] = stacked_image_patches
 
-        # if self.do_pad:
-        #     processed_frames = self._pad_for_batching(processed_frames)
+            processed_image_patches = self.reorder_images(
+                processed_image_patches_grouped, grouped_image_patches_index
+            )
 
-        # if self.return_tensors:
-        #     processed_frames = torch.cat(processed_frames, dim=0)
+            processed_image_patches_stacked = torch.stack(
+                processed_image_patches, dim=0)
 
-        return processed_frames
+            processed_frames.append(processed_image_patches_stacked)
+            image_sizes.append(torch.tensor([frame.shape[1], frame.shape[2]]))
+
+        if self.do_pad:
+            processed_frames = self._pad_for_batching(processed_frames)
+
+        processed_frames_stacked = torch.cat(processed_frames, dim=0)
+        image_sizes_stacked = torch.cat(image_sizes, dim=0)
+
+        return {"eagle_pixel_values": processed_frames_stacked, "eagle_image_sizes": image_sizes_stacked}
+
+    def group_images_by_shape(self, images: List[torch.Tensor]) -> Tuple[Dict[str, torch.Tensor], Dict[int, Tuple[str, int]]]:
+        """
+        Groups images by their shapes (height, width) for efficient batch processing.
+        TorchScript compatible implementation.
+
+        This method organizes a list of images into groups based on their dimensions,
+        facilitating efficient batch processing as images of the same size can be 
+        processed together without resizing or padding.
+
+        Args:
+            images (List[torch.Tensor]): List of image tensors to be grouped.
+                Each tensor should be in format [C, H, W].
+
+        Returns:
+            Tuple containing:
+                - Dict[str, torch.Tensor]: Dictionary where keys are "HxW" strings 
+                  and values are stacked tensors of images with that shape.
+                - Dict[int, Tuple[str, int]]: Dictionary mapping original image 
+                  indices to their position in the grouped structure. Each value is a tuple 
+                  containing (shape_key, index_within_shape_group).
+        """
+        # Group images by shape using regular dict (TorchScript compatible)
+        grouped_images: Dict[str, List[torch.Tensor]] = {}
+        indices: Dict[int, Tuple[str, int]] = {}
+
+        for idx, image in enumerate(images):
+            # Extract (height, width) from tensor shape [C, H, W]
+            if image.ndim >= 2:
+                height = int(image.shape[-2])
+                width = int(image.shape[-1])
+                shape_key = str(height) + "x" + str(width)
+            else:
+                raise ValueError("Image at index " +
+                                 str(idx) + " has invalid shape")
+
+            # Add image to the appropriate group
+            if shape_key not in grouped_images:
+                grouped_images[shape_key] = []
+            grouped_images[shape_key].append(image)
+
+            # Track the index within this shape group
+            shape_group_index = len(grouped_images[shape_key]) - 1
+            indices[idx] = (shape_key, shape_group_index)
+
+        # Stack images in each group for efficient processing
+        stacked_grouped_images: Dict[str, torch.Tensor] = {}
+        for shape_key in grouped_images:
+            image_list = grouped_images[shape_key]
+            # Stack all images of the same shape into a single tensor
+            stacked_grouped_images[shape_key] = torch.stack(image_list, dim=0)
+
+        return stacked_grouped_images, indices
+
+    def reorder_images(self, grouped_images: Dict[str, torch.Tensor],
+                       indices: Dict[int, Tuple[str, int]]) -> List[torch.Tensor]:
+        """
+        Reorders processed images back to their original sequence.
+        TorchScript compatible implementation.
+
+        This method reconstructs the original image order after batch processing
+        images that were grouped by shape.
+
+        Args:
+            grouped_images (Dict[str, torch.Tensor]): Dictionary of 
+                processed image groups where keys are "HxW" strings and 
+                values are stacked tensors.
+            indices (Dict[int, Tuple[str, int]]): Dictionary mapping 
+                original image indices to their position in the grouped structure.
+
+        Returns:
+            List[torch.Tensor]: List of images in their original order.
+        """
+        reordered_images: List[torch.Tensor] = []
+
+        # Get the number of images to reorder
+        num_images = len(indices)
+
+        # Process images in original order (0, 1, 2, ...)
+        for idx in range(num_images):
+            shape_key, shape_group_index = indices[idx]
+            # Extract the specific image from the stacked tensor
+            stacked_images = grouped_images[shape_key]
+            image = stacked_images[shape_group_index]
+            reordered_images.append(image)
+
+        return reordered_images
+
+    def rescale_and_normalize(self, image: torch.Tensor, do_rescale: bool,
+                              rescale_factor: float, do_normalize: bool,
+                              image_mean: List[float], image_std: List[float]) -> torch.Tensor:
+        """
+        Rescale and normalize image.
+        TorchScript compatible implementation.
+
+        Args:
+            image: Input image tensor
+            do_rescale: Whether to rescale
+            rescale_factor: Factor to rescale by
+            do_normalize: Whether to normalize
+            image_mean: Mean values for normalization
+            image_std: Standard deviation values for normalization
+
+        Returns:
+            Rescaled and normalized image tensor
+        """
+        # Convert to float32 first (like BaseImageProcessorFast does)
+        image = image.to(torch.float32)
+
+        if do_rescale:
+            image = image * rescale_factor
+
+        if do_normalize:
+            # Convert lists to tensors for normalization
+            mean = torch.tensor(
+                image_mean, dtype=image.dtype, device=image.device)
+            std = torch.tensor(image_std, dtype=image.dtype,
+                               device=image.device)
+
+            # Reshape for broadcasting: [C, 1, 1] for [N, C, H, W] tensors
+            if image.ndim == 4:  # [N, C, H, W]
+                mean = mean.view(1, -1, 1, 1)
+                std = std.view(1, -1, 1, 1)
+            elif image.ndim == 3:  # [C, H, W]
+                mean = mean.view(-1, 1, 1)
+                std = std.view(-1, 1, 1)
+
+            image = (image - mean) / std
+
+        return image
