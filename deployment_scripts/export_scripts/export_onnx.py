@@ -108,11 +108,13 @@ def export_eagle2_vit(vision_model, output_dir):
     pixel_values = torch.randn(
         (1, model.config.num_channels,
          model.config.image_size, model.config.image_size),
-        dtype=torch.float16,
+        dtype=torch.float32,
         device="cuda",
     )
     position_ids = torch.arange(
-        model.embeddings.num_patches, device="cuda").expand((1, -1))
+        model.embeddings.num_patches, device="cuda").expand((1, -1)).to(torch.int32)
+
+    print(position_ids.shape, position_ids.dtype)
 
     os.makedirs(output_dir, exist_ok=True)
     with torch.inference_mode():
@@ -204,7 +206,7 @@ def export_eagle2_llm(backbone_model, backbone_config, output_dir, attention_mas
     model.eval().cuda()
 
     input_ids = torch.randint(
-        100, (1, attention_mask.shape[1]), dtype=torch.int64).cuda()
+        100, (1, attention_mask.shape[1]), dtype=torch.int32).cuda()
     input_ids[:, : model.eagle_model.num_image_token] = model.eagle_model.image_token_index
     vit_embeds = torch.randn(
         (
@@ -215,7 +217,7 @@ def export_eagle2_llm(backbone_model, backbone_config, output_dir, attention_mas
         dtype=torch.float16,
     ).cuda()
     attention_mask = torch.ones(
-        (1, attention_mask.shape[1]), dtype=torch.int64).cuda()
+        (1, attention_mask.shape[1]), dtype=torch.int32).cuda()
 
     os.makedirs(output_dir, exist_ok=True)
     with torch.inference_mode():
@@ -228,10 +230,10 @@ def export_eagle2_llm(backbone_model, backbone_config, output_dir, attention_mas
             opset_version=19,
             do_constant_folding=True,
             dynamic_axes={
-                "input_ids": {0: "batch_size", 1: "sequence_length"},
+                "input_ids": {0: "batch_size"},
                 "vit_embeds": {0: "batch_size"},
-                "attention_mask": {0: "batch_size", 1: "sequence_length"},
-                "embeddings": {0: "batch_size", 1: "sequence_length"},
+                "eagle_attention_mask": {0: "batch_size"},
+                "embeddings": {0: "batch_size"},
             },
         )
 
@@ -389,6 +391,8 @@ def export_action_head(policy, ONNX_export_path, input_state, attention_mask):
 def export_onnx(
     dataset: LeRobotSingleDataset,
     policy: Gr00tPolicy,
+    input_state: torch.Tensor,
+    attention_mask: torch.Tensor,
     onnx_model_path: str,
 ) -> Dict[str, float]:
 
@@ -406,4 +410,6 @@ def export_onnx(
     export_eagle2_llm(
         policy.model.backbone, policy.model.config.backbone_cfg, onnx_model_path, attention_mask
     )
-    # export_action_head(policy, onnx_model_path, state, attention_mask)
+    
+    # Removed action head export since it's covered by denoising subgraph
+    #export_action_head(policy, onnx_model_path, input_state, attention_mask)

@@ -94,16 +94,19 @@ if __name__ == "__main__":
         model_path=postprocess_model_path,
     )
 
-    export_onnx(
-        dataset=dataset,
-        policy=policy,
-        onnx_model_path=args.onnx_model_path,
-    )
-
     inputs = get_input_info(policy, dataset[0])
 
     attention_mask = inputs["eagle_attention_mask"]
     state = inputs["state"]
+
+    export_onnx(
+        dataset=dataset,
+        policy=policy,
+        input_state=state,
+        attention_mask=attention_mask,
+        onnx_model_path=args.onnx_model_path,
+    )
+
     export_denoising_subgraph(
         policy=policy,
         input_state=state,

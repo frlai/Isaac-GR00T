@@ -28,6 +28,7 @@ from gr00t.experiment.data_config import DATA_CONFIG_MAP
 from gr00t.model.policy import Gr00tPolicy
 
 
+# Used for apple-to-apple comparsion with isaac-deployment
 class SyntheticDataGenerator:
     """Generates synthetic input data for GR00T inference testing."""
     
@@ -177,6 +178,7 @@ def log_prediction_stats(predictions, mode_name, prediction_count=1):
                         f"[min: {tensor_array.min():.3f}, max: {tensor_array.max():.3f}, "
                         f"mean: {tensor_array.mean():.3f}]"
                     )
+                    print(f"    Values: {tensor_array.flatten()[:5]}")
                 else:
                     print(f"  {tensor_name}: {tensor_array.shape} {tensor_array.dtype} [empty]")
             except (RuntimeError, ValueError, AttributeError) as e:
@@ -349,17 +351,24 @@ if __name__ == "__main__":
                 dtype=torch.float16,
                 device=device,
             )
-            print(f"\n=== Generated init_actions ===")
-            print(f"  Shape: {policy.model.action_head.init_actions.shape}")
-            print(f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
-
-        print(f"  num_inference_timesteps: {policy.model.action_head.num_inference_timesteps}")
+        
+        # Use the same PyTorch forward as in compare mode for consistency
+        policy.model.action_head.get_action = partial(
+            action_head_pytorch_forward, policy.model.action_head
+        )
         predicted_action = policy.get_action(step_data)
         log_prediction_stats(predicted_action, "PyTorch", prediction_count)
 
     elif args.inference_mode == "tensorrt":
         # Setup TensorRT engines
-        setup_tensorrt_engines(policy, args.trt_engine_path)
+        torch.cuda.manual_seed(42)
+        if not hasattr(policy.model.action_head, "init_actions"):
+            policy.model.action_head.init_actions = torch.randn(
+                (1, policy.model.action_head.action_horizon, policy.model.action_head.action_dim),
+                dtype=torch.float16,
+                device=device,
+            )
+        setup_denoising_subgraph_engine(policy, args.trt_engine_path)
 
         predicted_action = policy.get_action(step_data)
         log_prediction_stats(predicted_action, "TensorRT", prediction_count)
@@ -373,20 +382,18 @@ if __name__ == "__main__":
                 dtype=torch.float16,
                 device=device,
             )
-            print(f"\n=== Generated init_actions ===")
-            print(f"  Shape: {policy.model.action_head.init_actions.shape}")
-            print(f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
+
+        # Setup TensorRT engines and run inference
+        setup_denoising_subgraph_engine(policy, args.trt_engine_path)
+        predicted_action_tensorrt = policy.get_action(step_data)
+        log_prediction_stats(predicted_action_tensorrt, "TensorRT", prediction_count)
+
         # PyTorch inference
         policy.model.action_head.get_action = partial(
             action_head_pytorch_forward, policy.model.action_head
         )
         predicted_action_torch = policy.get_action(step_data)
         log_prediction_stats(predicted_action_torch, "PyTorch", prediction_count)
-
-        # Setup TensorRT engines and run inference
-        setup_denoising_subgraph_engine(policy, args.trt_engine_path)
-        predicted_action_tensorrt = policy.get_action(step_data)
-        log_prediction_stats(predicted_action_tensorrt, "TensorRT", prediction_count)
 
         # Compare predictions
         compare_predictions(predicted_action_tensorrt, predicted_action_torch)

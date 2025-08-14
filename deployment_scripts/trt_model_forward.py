@@ -31,9 +31,10 @@ def eagle_tensorrt_forward(self, vl_input):
 
     self.set_frozen_modules_to_eval_mode()
     batch_size = vl_input["pixel_values"].shape[0]
-    position_ids = torch.arange(self.num_patches, device="cuda").expand((batch_size, -1))
-    if vl_input["pixel_values"].dtype != torch.float16:
-        vl_input["pixel_values"] = vl_input["pixel_values"].to(torch.float16)
+    position_ids = torch.arange(self.num_patches, device="cuda").expand((batch_size, -1)).to(torch.int32)
+    vl_input["pixel_values"] = vl_input["pixel_values"].to(torch.float32)
+    vl_input["attention_mask"] = vl_input["attention_mask"].to(torch.int32)
+    vl_input["input_ids"] = vl_input["input_ids"].to(torch.int32)
 
     assert (
         vl_input["pixel_values"].shape[0] <= 8
@@ -41,7 +42,19 @@ def eagle_tensorrt_forward(self, vl_input):
 
     self.vit_engine.set_runtime_tensor_shape("pixel_values", vl_input["pixel_values"].shape)
     self.vit_engine.set_runtime_tensor_shape("position_ids", position_ids.shape)
+
+    print("Input pixel_values: ", vl_input["pixel_values"].shape)
+    print("Input pixel_values mean: ", vl_input["pixel_values"].mean().item())
+    print("Input pixel_values values: ", vl_input["pixel_values"].flatten()[:5])
+
+    print("Input position_ids: ", position_ids.shape)
+    print("Input position_ids mean: ", position_ids.to(torch.float32).mean().item())
+    print("Input position_ids values: ", position_ids.flatten()[:5])
+
     vit_embeds = self.vit_engine(vl_input["pixel_values"], position_ids)["vit_embeds"]
+    print(f"vit_embeds: {vit_embeds.shape}")
+    print(f"vit_embeds mean: {vit_embeds.mean().item():.6f}")
+    print(f"vit_embeds values: {vit_embeds.flatten()[:5]}")
 
     self.llm_engine.set_runtime_tensor_shape("input_ids", vl_input["input_ids"].shape)
     self.llm_engine.set_runtime_tensor_shape("vit_embeds", vit_embeds.shape)
@@ -49,6 +62,9 @@ def eagle_tensorrt_forward(self, vl_input):
     embeddings = self.llm_engine(vl_input["input_ids"], vit_embeds, vl_input["attention_mask"])[
         "embeddings"
     ]
+    print(f"embeddings: {embeddings.shape}")
+    print(f"embeddings mean: {embeddings.mean().item():.6f}")
+    print(f"embeddings values: {embeddings.flatten()[:5]}")
 
     return BatchFeature(
         data={

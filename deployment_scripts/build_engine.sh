@@ -35,24 +35,24 @@ fi
 mkdir -p gr00t_engine
 
 # VLLN-VLSelfAttention
-echo "------------Building vlln_vl_self_attention Model--------------------"
-#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=gr00t_onnx/action_head/vlln_vl_self_attention.onnx --saveEngine=gr00t_engine/vlln_vl_self_attention.engine --minShapes=backbone_features:1x${MIN_LEN}x2048 --optShapes=backbone_features:1x${OPT_LEN}x2048 --maxShapes=backbone_features:8x${MAX_LEN}x2048 > gr00t_engine/vlln_vl_self_attention.log 2>&1
+#echo "------------Building vlln_vl_self_attention Model--------------------"
+#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=saved_models/action_head/vlln_vl_self_attention.onnx --saveEngine=gr00t_engine/vlln_vl_self_attention.engine --minShapes=backbone_features:1x${MIN_LEN}x2048 --optShapes=backbone_features:1x${OPT_LEN}x2048 --maxShapes=backbone_features:8x${MAX_LEN}x2048 > gr00t_engine/vlln_vl_self_attention.log 2>&1
 
 # DiT Model
-echo "------------Building DiT Model--------------------"
-#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=gr00t_onnx/action_head/DiT.onnx --saveEngine=gr00t_engine/DiT.engine --minShapes=sa_embs:1x49x1536,vl_embs:1x${MIN_LEN}x2048,timesteps_tensor:1  --optShapes=sa_embs:1x49x1536,vl_embs:1x${OPT_LEN}x2048,timesteps_tensor:1  --maxShapes=sa_embs:8x49x1536,vl_embs:8x${MAX_LEN}x2048,timesteps_tensor:8 > gr00t_engine/build_DiT.log 2>&1
+#echo "------------Building DiT Model--------------------"
+#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=saved_models/action_head/DiT.onnx --saveEngine=gr00t_engine/DiT.engine --minShapes=sa_embs:1x49x1536,vl_embs:1x${MIN_LEN}x2048,timesteps_tensor:1  --optShapes=sa_embs:1x49x1536,vl_embs:1x${OPT_LEN}x2048,timesteps_tensor:1  --maxShapes=sa_embs:8x49x1536,vl_embs:8x${MAX_LEN}x2048,timesteps_tensor:8 > gr00t_engine/build_DiT.log 2>&1
 
 # State Encoder
-echo "------------Building State Encoder--------------------"
-#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=gr00t_onnx/action_head/state_encoder.onnx --saveEngine=gr00t_engine/state_encoder.engine --minShapes=state:1x1x64,embodiment_id:1  --optShapes=state:1x1x64,embodiment_id:1 --maxShapes=state:8x1x64,embodiment_id:8 > gr00t_engine/build_state_encoder.log 2>&1
+#echo "------------Building State Encoder--------------------"
+#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=saved_models/action_head/state_encoder.onnx --saveEngine=gr00t_engine/state_encoder.engine --minShapes=state:1x1x64,embodiment_id:1  --optShapes=state:1x1x64,embodiment_id:1 --maxShapes=state:8x1x64,embodiment_id:8 > gr00t_engine/build_state_encoder.log 2>&1
 
 # Action Encoder
-echo "------------Building Action Encoder--------------------"
-#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=gr00t_onnx/action_head/action_encoder.onnx --saveEngine=gr00t_engine/action_encoder.engine --minShapes=actions:1x16x32,timesteps_tensor:1,embodiment_id:1  --optShapes=actions:1x16x32,timesteps_tensor:1,embodiment_id:1  --maxShapes=actions:8x16x32,timesteps_tensor:8,embodiment_id:8 > gr00t_engine/build_action_encoder.log 2>&1
+#echo "------------Building Action Encoder--------------------"
+#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=saved_models/action_head/action_encoder.onnx --saveEngine=gr00t_engine/action_encoder.engine --minShapes=actions:1x16x32,timesteps_tensor:1,embodiment_id:1  --optShapes=actions:1x16x32,timesteps_tensor:1,embodiment_id:1  --maxShapes=actions:8x16x32,timesteps_tensor:8,embodiment_id:8 > gr00t_engine/build_action_encoder.log 2>&1
 
 # Action Decoder
-echo "------------Building Action Decoder--------------------"
-#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=gr00t_onnx/action_head/action_decoder.onnx --saveEngine=gr00t_engine/action_decoder.engine --minShapes=model_output:1x49x1024,embodiment_id:1  --optShapes=model_output:1x49x1024,embodiment_id:1  --maxShapes=model_output:8x49x1024,embodiment_id:8 > gr00t_engine/build_action_decoder.log 2>&1
+#echo "------------Building Action Decoder--------------------"
+#trtexec --useCudaGraph --verbose --stronglyTyped --separateProfileRun --noDataTransfers --onnx=saved_models/action_head/action_decoder.onnx --saveEngine=gr00t_engine/action_decoder.engine --minShapes=model_output:1x49x1024,embodiment_id:1  --optShapes=model_output:1x49x1024,embodiment_id:1  --maxShapes=model_output:8x49x1024,embodiment_id:8 > gr00t_engine/build_action_decoder.log 2>&1
 
 # VLM-ViT
 echo "------------Building VLM-ViT--------------------"
