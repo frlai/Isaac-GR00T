@@ -448,10 +448,14 @@ class Gr00tVideoLanguageTransform(nn.Module):
         for key in self.known_outputs:
             if key not in expected_outputs:
                 raise ValueError(f"Expected output {key} not found")
-            self.gr00t_transform_outputs[key] = expected_outputs[key]
+            self.gr00t_transform_outputs[key] = expected_outputs[key].to(
+                torch.int32)
 
     def forward(self, data: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         video_transform_outputs = self.video_transform(data)
+        if "eagle_image_sizes" in video_transform_outputs:
+            video_transform_outputs["eagle_image_sizes"] = video_transform_outputs["eagle_image_sizes"].to(
+                torch.int32)
         outputs = {}
         for key in self.gr00t_transform_outputs:
             outputs[key] = self.gr00t_transform_outputs[key]
