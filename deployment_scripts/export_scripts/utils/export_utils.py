@@ -297,9 +297,9 @@ def test_gr00t_process_consistency(output_export, output_gr00t):
                                      output_gr00t_tensor,
                                      key)
     if success:
-        print("SUCCESS")
+        print("\033[92mSUCCESS\033[0m")
     else:
-        print("FAILED")
+        print("\033[91mFAILED\033[0m")
 
     return success
 

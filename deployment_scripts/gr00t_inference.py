@@ -28,10 +28,9 @@ from gr00t.experiment.data_config import DATA_CONFIG_MAP
 from gr00t.model.policy import Gr00tPolicy
 
 
-# Used for apple-to-apple comparsion with isaac-deployment
 class SyntheticDataGenerator:
     """Generates synthetic input data for GR00T inference testing."""
-    
+
     STATE_DIMS = {
         'left_arm': 7,
         'left_hand': 6,
@@ -41,16 +40,16 @@ class SyntheticDataGenerator:
     VIDEO_DIMS = (1, 1, 256, 256, 3)
     POSITION_IDS_LENGTH = 256
     RANDOM_SEED = 42
-    
+
     def __init__(self, seed=42):
         """Initialize the synthetic data generator."""
         self.seed = seed
         np.random.seed(self.seed)
         self.rng = np.random.default_rng(self.seed)
-        
+
         self._create_synthetic_data()
         self._create_position_ids()
-    
+
     def _create_synthetic_data(self) -> None:
         """Create synthetic data pool similar to reference implementation."""
         self.synthetic_data = {
@@ -61,15 +60,15 @@ class SyntheticDataGenerator:
             'video_data': self._generate_video_data(),
             'task_description': 'pick the pear from the counter and place it in the plate',
         }
-    
+
     def _generate_state_data(self, dim: int) -> np.ndarray:
         """Generate synthetic state data."""
         return (self.rng.random((1, 1, dim)) - 0.5).astype(np.float32)
-    
+
     def _generate_video_data(self) -> np.ndarray:
         """Generate synthetic video data."""
         return (self.rng.random(self.VIDEO_DIMS) * 255).astype(np.uint8)
-    
+
     def _create_position_ids(self) -> None:
         """Create fixed position IDs."""
         try:
@@ -82,23 +81,23 @@ class SyntheticDataGenerator:
             self.fixed_position_ids = np.arange(0, self.POSITION_IDS_LENGTH, dtype=np.int32).reshape(
                 1, self.POSITION_IDS_LENGTH
             )
-    
+
     def create_step_data(self, dataset):
         """
         Create synthetic step data that matches the dataset structure.
-        
+
         Args:
             dataset: The dataset to get structure from
-            
+
         Returns:
             Synthetic step data for inference
         """
         # Get a sample from the dataset to understand the structure
         sample_data = dataset[0]
-        
+
         # Create synthetic data using the pre-generated pool
         synthetic_step_data = {}
-        
+
         for key, value in sample_data.items():
             # Map to pre-generated synthetic data
             state_key = self._map_state_key(key)
@@ -113,9 +112,9 @@ class SyntheticDataGenerator:
             else:
                 # Keep original data for unmapped keys
                 synthetic_step_data[key] = value
-        
+
         return synthetic_step_data
-    
+
     def _map_state_key(self, key: str) -> str:
         """Map dataset state key to synthetic data key."""
         key_lower = key.lower()
@@ -133,11 +132,11 @@ class SyntheticDataGenerator:
 def create_synthetic_input_data(dataset, seed=42):
     """
     Create synthetic input data for testing using structured data pool.
-    
+
     Args:
         dataset: The dataset to get structure from
         seed: Random seed for reproducibility
-    
+
     Returns:
         Synthetic step data for inference
     """
@@ -148,14 +147,14 @@ def create_synthetic_input_data(dataset, seed=42):
 def log_prediction_stats(predictions, mode_name, prediction_count=1):
     """
     Log detailed statistics for predictions
-    
+
     Args:
         predictions: Prediction results dictionary
         mode_name: Name of the inference mode (PyTorch/TensorRT)
         prediction_count: Current prediction number
     """
     print(f"\n=== {mode_name} Inference Output #{prediction_count} ===")
-    
+
     for tensor_name, tensor_data in predictions.items():
         if tensor_data is not None:
             try:
@@ -166,21 +165,28 @@ def log_prediction_stats(predictions, mode_name, prediction_count=1):
                     # Handle CuPy tensors or other DLPack compatible tensors
                     try:
                         import cupy as cp
-                        tensor_array = cp.from_dlpack(tensor_data.__dlpack__()).get()
+                        tensor_array = cp.from_dlpack(
+                            tensor_data.__dlpack__()).get()
                     except ImportError:
                         tensor_array = tensor_data
                 else:
                     tensor_array = tensor_data
-                
+
                 if tensor_array.size > 0:
                     print(
                         f"  {tensor_name}: {tensor_array.shape} {tensor_array.dtype} "
                         f"[min: {tensor_array.min():.3f}, max: {tensor_array.max():.3f}, "
                         f"mean: {tensor_array.mean():.3f}]"
                     )
+
+
+<< << << < HEAD
                     print(f"    Values: {tensor_array.flatten()[:5]}")
+== == == =
+>>>>>> > frlai/export_tokenizer_improc
                 else:
-                    print(f"  {tensor_name}: {tensor_array.shape} {tensor_array.dtype} [empty]")
+                    print(
+                        f"  {tensor_name}: {tensor_array.shape} {tensor_array.dtype} [empty]")
             except (RuntimeError, ValueError, AttributeError) as e:
                 print(f"  {tensor_name}: <error processing tensor: {e}>")
         else:
@@ -351,11 +357,11 @@ if __name__ == "__main__":
                 dtype=torch.float16,
                 device=device,
             )
-        
-        # Use the same PyTorch forward as in compare mode for consistency
-        policy.model.action_head.get_action = partial(
-            action_head_pytorch_forward, policy.model.action_head
-        )
+            print(f"\n=== Generated init_actions ===")
+            print(f"  Shape: {policy.model.action_head.init_actions.shape}")
+            print(f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
+
+        print(f"  num_inference_timesteps: {policy.model.action_head.num_inference_timesteps}")
         predicted_action = policy.get_action(step_data)
         log_prediction_stats(predicted_action, "PyTorch", prediction_count)
 
@@ -382,18 +388,20 @@ if __name__ == "__main__":
                 dtype=torch.float16,
                 device=device,
             )
-
-        # Setup TensorRT engines and run inference
-        setup_denoising_subgraph_engine(policy, args.trt_engine_path)
-        predicted_action_tensorrt = policy.get_action(step_data)
-        log_prediction_stats(predicted_action_tensorrt, "TensorRT", prediction_count)
-
+            print(f"\n=== Generated init_actions ===")
+            print(f"  Shape: {policy.model.action_head.init_actions.shape}")
+            print(f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
         # PyTorch inference
         policy.model.action_head.get_action = partial(
             action_head_pytorch_forward, policy.model.action_head
         )
         predicted_action_torch = policy.get_action(step_data)
         log_prediction_stats(predicted_action_torch, "PyTorch", prediction_count)
+
+        # Setup TensorRT engines and run inference
+        setup_denoising_subgraph_engine(policy, args.trt_engine_path)
+        predicted_action_tensorrt = policy.get_action(step_data)
+        log_prediction_stats(predicted_action_tensorrt, "TensorRT", prediction_count)
 
         # Compare predictions
         compare_predictions(predicted_action_tensorrt, predicted_action_torch)

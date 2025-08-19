@@ -178,26 +178,30 @@ def export_eagle2_llm(backbone_model, backbone_config, output_dir, attention_mas
 
             input_ids = input_ids.reshape(B * N)
             selected = input_ids == self.eagle_model.image_token_index
-            input_embeds[selected] = vit_embeds.reshape(-1, C)
-            # try:
-            #     input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds.reshape(-1, C)
-            # except Exception as e:
-            #     vit_embeds = vit_embeds.reshape(-1, C)
-            #     print(
-            #         f"warning: {e}, input_embeds[selected].shape={input_embeds[selected].shape}, "
-            #         f"vit_embeds.shape={vit_embeds.shape}"
-            #     )
-            #     n_token = selected.sum()
-            #     input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds[:n_token]
+            embeds_to_scatter = vit_embeds.reshape(-1, C).to(
+                input_embeds.device, input_embeds.dtype)
+            # input_embeds[selected] = embeds_to_scatter
+            # Since selected is always a contiguous block [0,0,0,1,1,1,1,0,0,0],
+            # we can find start and length without using nonzero (which creates ONNX issues)
+            selected_float = selected.float()
+            num_vision_tokens = selected.sum().item()
+
+            if num_vision_tokens > 0:
+                # Find the start index of the first 1 using argmax
+                start_idx = torch.argmax(selected_float).item()
+
+                # Replace the contiguous block with vision embeddings using simple slicing
+                input_embeds[start_idx: start_idx +
+                             num_vision_tokens] = embeds_to_scatter[:num_vision_tokens]
 
             input_embeds = input_embeds.reshape(B, N, C)
 
-            outputs = self.eagle_model.language_model(
+            embeddings = self.eagle_model.language_model(
                 inputs_embeds=input_embeds,
                 attention_mask=attention_mask,
                 output_hidden_states=True,
             )
-            eagle_features = outputs.hidden_states[self.select_layer]
+            eagle_features = embeddings.hidden_states[self.select_layer]
             eagle_features = self.eagle_linear(eagle_features)
             return eagle_features
 
@@ -229,12 +233,12 @@ def export_eagle2_llm(backbone_model, backbone_config, output_dir, attention_mas
             output_names=["embeddings"],
             opset_version=19,
             do_constant_folding=True,
-            dynamic_axes={
-                "input_ids": {0: "batch_size"},
-                "vit_embeds": {0: "batch_size"},
-                "eagle_attention_mask": {0: "batch_size"},
-                "embeddings": {0: "batch_size"},
-            },
+            # dynamic_axes={
+            #     "input_ids": {0: "batch_size", 1: "sequence_length"},
+            #     "vit_embeds": {0: "batch_size"},
+            #     "attention_mask": {0: "batch_size", 1: "sequence_length"},
+            #     "embeddings": {0: "batch_size", 1: "sequence_length"},
+            # },
         )
 
 
@@ -410,6 +414,6 @@ def export_onnx(
     export_eagle2_llm(
         policy.model.backbone, policy.model.config.backbone_cfg, onnx_model_path, attention_mask
     )
-    
+
     # Removed action head export since it's covered by denoising subgraph
-    #export_action_head(policy, onnx_model_path, input_state, attention_mask)
+    # export_action_head(policy, onnx_model_path, input_state, attention_mask)

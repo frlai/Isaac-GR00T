@@ -3,6 +3,7 @@ from .utils import state_action_transform_modules as export_state_action
 from .utils import concat_transform_modules as export_concat
 from .utils import gr00t_transform_modules as export_gr00t_state_action
 from .utils import gr00t_tokenizer as export_gr00t_video_language
+from .utils import video_language_transfrom_module as export_eagle2_video_language
 
 import torch
 import copy
@@ -23,12 +24,14 @@ def export_and_test_preprocess(data, policy, model_path):
     output_gr00t = get_input_info(policy, data)
     state_action_module = ComposedGr00tModule()
     video_module = ComposedGr00tModule()
+    eagle2_video_module = ComposedGr00tModule()
     for idx, preprocessing_step in enumerate(policy._modality_transform.transforms):
         params = preprocessing_step.__dict__
         # Get the class name of the preprocessing step
         step_class_name = preprocessing_step.__class__.__name__
         state_action_step = None
         video_step = None
+        eagle2_video_step = None
         # Import the corresponding export module class
         if "Video" in step_class_name:
             video_step = getattr(export_video, step_class_name)
@@ -40,6 +43,8 @@ def export_and_test_preprocess(data, policy, model_path):
         elif "GR00TTransform" in step_class_name:
             state_action_step = getattr(
                 export_gr00t_state_action, step_class_name)
+            eagle2_video_step = getattr(
+                export_eagle2_video_language, "Eagle2VideoTransform")
             metadata = {
                 'default_instruction': params['default_instruction'],
                 'embodiment_tag': params['embodiment_tag'].value,
@@ -66,6 +71,11 @@ def export_and_test_preprocess(data, policy, model_path):
                 f"Creating {step_class_name}export instance and adding to video module")
             video_module.add_module(
                 f"step_{idx}_{step_class_name}", video_step(**params))
+
+        if eagle2_video_step:
+            from .utils.video_language_transfrom_module import Gr00tVideoLanguageTransform
+            eagle2_tokenizer = Gr00tVideoLanguageTransform(**params)
+            eagle2_tokenizer.set_gr00t_transform_outputs(output_gr00t)
 
     # new requirement: convert the input to f32 required
     state_inputs = {k: v.to(torch.float32)
@@ -106,16 +116,17 @@ def export_and_test_preprocess(data, policy, model_path):
     yaml.dump(describe_video_inputs, open(
         model_path+"/preprocess_video.yaml", "w"))
 
+    video_language_inputs = {**video_output, **language_inputs}
+
     with open(os.path.join(model_path, "tokenizer_params.yaml"), "r") as f:
         tokenizer_params = yaml.load(f, Loader=yaml.FullLoader)
     video_language_module = export_gr00t_video_language.GR00TTransform(
         **tokenizer_params)
 
-    video_language_inputs = {**video_output, **language_inputs}
     input_description, input_format = describe_io(video_language_inputs)
 
-    video_language_output = video_language_module(video_language_inputs)
-    output_description, output_format = describe_io(video_language_output)
+    python_gr00t_output = video_language_module(video_language_inputs)
+    output_description, output_format = describe_io(python_gr00t_output)
     describe_video_language_inputs = {"inference": {"input_nodes": input_description,
                                                     "output_nodes": output_description,
                                                     "input_format": [input_format],
@@ -123,10 +134,29 @@ def export_and_test_preprocess(data, policy, model_path):
     yaml.dump(describe_video_language_inputs, open(
         model_path+"/preprocess_video_language.yaml", "w"))
 
+    scripted_module = torch.jit.script(eagle2_tokenizer)
+    scripted_module.save(os.path.join(
+        model_path, "eagle2_tokenizer.pt"))
+    scripted_module = torch.jit.load(os.path.join(
+        model_path, "eagle2_tokenizer.pt"))
+    input_description, input_format = describe_io(video_output)
+    video_language_output = scripted_module(video_output)
+    output_description, output_format = describe_io(video_language_output)
+    describe_video_outputs = {"inference": {"input_nodes": input_description,
+                                            "output_nodes": output_description,
+                                            "input_format": [input_format],
+                                            "output_format": output_format}}
+    yaml.dump(describe_video_outputs, open(
+        model_path+"/eagle2_tokenizer.yaml", "w"))
+
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}
+    output_python_tokenizer = {
+        **state_action_output_export, **python_gr00t_output}
 
-    return test_gr00t_process_consistency(output_export, output_gr00t)
+    print("testing both implementations of the tokenizer")
+    return (test_gr00t_process_consistency(output_export, output_gr00t) and
+            test_gr00t_process_consistency(output_python_tokenizer, output_gr00t))
 
 
 if __name__ == "__main__":
