@@ -154,11 +154,6 @@ def export_and_test_preprocess(data, policy, model_path):
     output_python_tokenizer = {
         **state_action_output_export, **python_gr00t_output}
 
-    for k, v in output_export.items():
-        print(k, v.shape, v.dtype, v.device)
-    import pdb
-    pdb.set_trace()
-
     print("testing both implementations of the tokenizer")
     return (test_gr00t_process_consistency(output_export, output_gr00t) and
             test_gr00t_process_consistency(output_python_tokenizer, output_gr00t))
