@@ -299,6 +299,8 @@ class Eagle2VideoTransform(nn.Module):
         if image_sizes_stacked.ndim == 1:
             image_sizes_stacked = image_sizes_stacked.unsqueeze(0)
 
+        image_sizes_stacked = image_sizes_stacked.to(
+            processed_frames_stacked.device)
         return {"eagle_pixel_values": processed_frames_stacked, "eagle_image_sizes": image_sizes_stacked}
 
     def group_images_by_shape(self, images: List[torch.Tensor]) -> Tuple[Dict[str, torch.Tensor], Dict[int, Tuple[str, int]]]:
@@ -456,9 +458,15 @@ class Gr00tVideoLanguageTransform(nn.Module):
         if "eagle_image_sizes" in video_transform_outputs:
             video_transform_outputs["eagle_image_sizes"] = video_transform_outputs["eagle_image_sizes"].to(
                 torch.int32)
+        device = video_transform_outputs["eagle_pixel_values"].device
+
         outputs = {}
         for key in self.gr00t_transform_outputs:
-            outputs[key] = self.gr00t_transform_outputs[key]
+            if self.gr00t_transform_outputs[key].device != device:
+                outputs[key] = self.gr00t_transform_outputs[key].to(device)
+            else:
+                outputs[key] = self.gr00t_transform_outputs[key]
+
         for key in video_transform_outputs:
             outputs[key] = video_transform_outputs[key]
 

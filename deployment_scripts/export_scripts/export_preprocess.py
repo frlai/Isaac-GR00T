@@ -149,12 +149,15 @@ def export_and_test_preprocess(data, policy, model_path):
     yaml.dump(describe_video_outputs, open(
         model_path+"/eagle2_tokenizer.yaml", "w"))
 
-    for k, v in video_language_output.items():
-        print(k, v.shape, v.dtype)
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}
     output_python_tokenizer = {
         **state_action_output_export, **python_gr00t_output}
+
+    for k, v in output_export.items():
+        print(k, v.shape, v.dtype, v.device)
+    import pdb
+    pdb.set_trace()
 
     print("testing both implementations of the tokenizer")
     return (test_gr00t_process_consistency(output_export, output_gr00t) and
