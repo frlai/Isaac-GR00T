@@ -23,7 +23,6 @@ def get_unprocessed_action(policy, observations):
     normalized_input = policy.apply_transforms(observations)
     normalized_action = policy._get_action_from_normalized_input(
         normalized_input)
-
     return normalized_action
 
 
