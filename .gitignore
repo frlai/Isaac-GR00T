@@ -122,5 +122,6 @@ playground/
 demo_data/gr00t-gr1-apple-to-shelf/
 tmp/
 output/
-hand_wave
+hand_wave/g1_wave
+hand_wave/GR00T-N1.5-3B-WaveHand-Dev
 saved_models
