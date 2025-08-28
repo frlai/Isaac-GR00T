@@ -180,19 +180,7 @@ def export_eagle2_llm(backbone_model, backbone_config, output_dir, attention_mas
             selected = input_ids == self.eagle_model.image_token_index
             embeds_to_scatter = vit_embeds.reshape(-1, C).to(
                 input_embeds.device, input_embeds.dtype)
-            # input_embeds[selected] = embeds_to_scatter
-            # Since selected is always a contiguous block [0,0,0,1,1,1,1,0,0,0],
-            # we can find start and length without using nonzero (which creates ONNX issues)
-            selected_float = selected.float()
-            num_vision_tokens = selected.sum().item()
-
-            if num_vision_tokens > 0:
-                # Find the start index of the first 1 using argmax
-                start_idx = torch.argmax(selected_float).item()
-
-                # Replace the contiguous block with vision embeddings using simple slicing
-                input_embeds[start_idx: start_idx +
-                             num_vision_tokens] = embeds_to_scatter[:num_vision_tokens]
+            input_embeds[selected] = embeds_to_scatter
 
             input_embeds = input_embeds.reshape(B, N, C)
 

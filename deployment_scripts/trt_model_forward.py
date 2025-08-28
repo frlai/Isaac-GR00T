@@ -31,7 +31,8 @@ def eagle_tensorrt_forward(self, vl_input):
 
     self.set_frozen_modules_to_eval_mode()
     batch_size = vl_input["pixel_values"].shape[0]
-    position_ids = torch.arange(self.num_patches, device="cuda").expand((batch_size, -1)).to(torch.int32)
+    position_ids = torch.arange(self.num_patches, device="cuda").expand(
+        (batch_size, -1)).to(torch.int32)
     vl_input["pixel_values"] = vl_input["pixel_values"].to(torch.float32)
     vl_input["attention_mask"] = vl_input["attention_mask"].to(torch.int32)
     vl_input["input_ids"] = vl_input["input_ids"].to(torch.int32)
@@ -40,25 +41,34 @@ def eagle_tensorrt_forward(self, vl_input):
         vl_input["pixel_values"].shape[0] <= 8
     ), "Batch size must be <= 8 because TensorRT engine was built with max_batch_size=8, you can try to adjust the max_batch_size in the build_engine.sh script and rebuild the engine."
 
-    self.vit_engine.set_runtime_tensor_shape("pixel_values", vl_input["pixel_values"].shape)
-    self.vit_engine.set_runtime_tensor_shape("position_ids", position_ids.shape)
+    self.vit_engine.set_runtime_tensor_shape(
+        "pixel_values", vl_input["pixel_values"].shape)
+    self.vit_engine.set_runtime_tensor_shape(
+        "position_ids", position_ids.shape)
 
     print("Input pixel_values: ", vl_input["pixel_values"].shape)
     print("Input pixel_values mean: ", vl_input["pixel_values"].mean().item())
-    print("Input pixel_values values: ", vl_input["pixel_values"].flatten()[:5])
+    print("Input pixel_values values: ",
+          vl_input["pixel_values"].flatten()[:5])
 
     print("Input position_ids: ", position_ids.shape)
-    print("Input position_ids mean: ", position_ids.to(torch.float32).mean().item())
+    print("Input position_ids mean: ",
+          position_ids.to(torch.float32).mean().item())
     print("Input position_ids values: ", position_ids.flatten()[:5])
 
-    vit_embeds = self.vit_engine(vl_input["pixel_values"], position_ids)["vit_embeds"]
+    vit_embeds = self.vit_engine(vl_input["pixel_values"], position_ids)[
+        "vit_embeds"]
+    print("VIT EMBEDS", vit_embeds)
+
     print(f"vit_embeds: {vit_embeds.shape}")
     print(f"vit_embeds mean: {vit_embeds.mean().item():.6f}")
     print(f"vit_embeds values: {vit_embeds.flatten()[:5]}")
 
-    self.llm_engine.set_runtime_tensor_shape("input_ids", vl_input["input_ids"].shape)
+    self.llm_engine.set_runtime_tensor_shape(
+        "input_ids", vl_input["input_ids"].shape)
     self.llm_engine.set_runtime_tensor_shape("vit_embeds", vit_embeds.shape)
-    self.llm_engine.set_runtime_tensor_shape("attention_mask", vl_input["attention_mask"].shape)
+    self.llm_engine.set_runtime_tensor_shape(
+        "attention_mask", vl_input["attention_mask"].shape)
     embeddings = self.llm_engine(vl_input["input_ids"], vit_embeds, vl_input["attention_mask"])[
         "embeddings"
     ]
@@ -77,7 +87,8 @@ def eagle_tensorrt_forward(self, vl_input):
 def action_head_tensorrt_forward(self, backbone_output, action_input):
     # backbone_output = self.process_backbone_output(backbone_output)
     if backbone_output.backbone_features.dtype != torch.float16:
-        backbone_output.backbone_features = backbone_output.backbone_features.to(torch.float16)
+        backbone_output.backbone_features = backbone_output.backbone_features.to(
+            torch.float16)
     self.vlln_vl_self_attention_engine.set_runtime_tensor_shape(
         "backbone_features", backbone_output.backbone_features.shape
     )
@@ -99,9 +110,12 @@ def action_head_tensorrt_forward(self, backbone_output, action_input):
 
     # Embed state with batch processing
 
-    self.state_encoder_engine.set_runtime_tensor_shape("state", action_input.state.shape)
-    self.state_encoder_engine.set_runtime_tensor_shape("embodiment_id", embodiment_id.shape)
-    state_features = self.state_encoder_engine(action_input.state, embodiment_id)["output"]
+    self.state_encoder_engine.set_runtime_tensor_shape(
+        "state", action_input.state.shape)
+    self.state_encoder_engine.set_runtime_tensor_shape(
+        "embodiment_id", embodiment_id.shape)
+    state_features = self.state_encoder_engine(
+        action_input.state, embodiment_id)["output"]
 
     # Set initial actions as the sampled noise.
     device = vl_embs.device
@@ -125,25 +139,31 @@ def action_head_tensorrt_forward(self, backbone_output, action_input):
         t_discretized = int(t_cont * self.num_timestep_buckets)
 
         # Embed noised action trajectory with batch processing
-        timesteps_tensor = torch.full(size=(batch_size,), fill_value=t_discretized, device=device)
+        timesteps_tensor = torch.full(
+            size=(batch_size,), fill_value=t_discretized, device=device)
 
-        self.action_encoder_engine.set_runtime_tensor_shape("actions", actions.shape)
+        self.action_encoder_engine.set_runtime_tensor_shape(
+            "actions", actions.shape)
         self.action_encoder_engine.set_runtime_tensor_shape(
             "timesteps_tensor", timesteps_tensor.shape
         )
-        self.action_encoder_engine.set_runtime_tensor_shape("embodiment_id", embodiment_id.shape)
+        self.action_encoder_engine.set_runtime_tensor_shape(
+            "embodiment_id", embodiment_id.shape)
         action_features = self.action_encoder_engine(actions, timesteps_tensor, embodiment_id)[
             "output"
         ]
 
         # Maybe add position embedding.
         if self.config.add_pos_embed:
-            pos_ids = torch.arange(action_features.shape[1], dtype=torch.long, device=device)
-            pos_embs = self.position_embedding(pos_ids).unsqueeze(0).to(torch.float16)
+            pos_ids = torch.arange(
+                action_features.shape[1], dtype=torch.long, device=device)
+            pos_embs = self.position_embedding(
+                pos_ids).unsqueeze(0).to(torch.float16)
             action_features = action_features + pos_embs
 
         # Join vision, language, state and action embedding along sequence dimension.
-        future_tokens = self.future_tokens.weight.unsqueeze(0).expand(vl_embs.shape[0], -1, -1)
+        future_tokens = self.future_tokens.weight.unsqueeze(
+            0).expand(vl_embs.shape[0], -1, -1)
         sa_embs = torch.cat((state_features, future_tokens, action_features), dim=1).to(
             torch.float16
         )
@@ -153,13 +173,18 @@ def action_head_tensorrt_forward(self, backbone_output, action_input):
 
         self.DiT_engine.set_runtime_tensor_shape("vl_embs", vl_embs.shape)
         self.DiT_engine.set_runtime_tensor_shape("sa_embs", sa_embs.shape)
-        self.DiT_engine.set_runtime_tensor_shape("timesteps_tensor", timesteps_tensor.shape)
-        model_output = self.DiT_engine(sa_embs, vl_embs, timesteps_tensor)["output"]
+        self.DiT_engine.set_runtime_tensor_shape(
+            "timesteps_tensor", timesteps_tensor.shape)
+        model_output = self.DiT_engine(
+            sa_embs, vl_embs, timesteps_tensor)["output"]
 
-        self.action_decoder_engine.set_runtime_tensor_shape("model_output", model_output.shape)
-        self.action_decoder_engine.set_runtime_tensor_shape("embodiment_id", embodiment_id.shape)
-        pred = self.action_decoder_engine(model_output, embodiment_id)["output"]
-        pred_velocity = pred[:, -self.action_horizon :]
+        self.action_decoder_engine.set_runtime_tensor_shape(
+            "model_output", model_output.shape)
+        self.action_decoder_engine.set_runtime_tensor_shape(
+            "embodiment_id", embodiment_id.shape)
+        pred = self.action_decoder_engine(
+            model_output, embodiment_id)["output"]
+        pred_velocity = pred[:, -self.action_horizon:]
 
         # Update actions using euler integration.
         actions = actions + dt * pred_velocity
@@ -170,27 +195,30 @@ def denoising_subgraph_tensorrt_forward(self, backbone_output, action_input):
     """TensorRT forward using integrated denoising subgraph engine"""
     # Process inputs to match denoising subgraph expectations
     if backbone_output.backbone_features.dtype != torch.float16:
-        backbone_output.backbone_features = backbone_output.backbone_features.to(torch.float16)
-    
+        backbone_output.backbone_features = backbone_output.backbone_features.to(
+            torch.float16)
+
     if action_input.state.dtype != torch.float16:
         action_input.state = action_input.state.to(torch.float16)
-    
+
     # Embodiment ID should be int32 for the ONNX model
     embodiment_id = action_input.embodiment_id
     if embodiment_id.dtype != torch.int32:
         embodiment_id = embodiment_id.to(torch.int32)
-    
+
     # Single engine call for the entire denoising pipeline
     self.denoising_subgraph_engine.set_runtime_tensor_shape(
         "embeddings", backbone_output.backbone_features.shape
     )
-    self.denoising_subgraph_engine.set_runtime_tensor_shape("state", action_input.state.shape)
-    self.denoising_subgraph_engine.set_runtime_tensor_shape("embodiment_id", embodiment_id.shape)
-    
+    self.denoising_subgraph_engine.set_runtime_tensor_shape(
+        "state", action_input.state.shape)
+    self.denoising_subgraph_engine.set_runtime_tensor_shape(
+        "embodiment_id", embodiment_id.shape)
+
     actions = self.denoising_subgraph_engine(
         backbone_output.backbone_features, action_input.state, embodiment_id
     )["actions"]
-    
+
     return BatchFeature(data={"action_pred": actions})
 
 
@@ -223,8 +251,10 @@ def setup_tensorrt_engines(policy, trt_engine_path):
     torch.cuda.empty_cache()
 
     # Setup backbone engines
-    policy.model.backbone.vit_engine = trt.Engine(os.path.join(trt_engine_path, "vit.engine"))
-    policy.model.backbone.llm_engine = trt.Engine(os.path.join(trt_engine_path, "llm.engine"))
+    policy.model.backbone.vit_engine = trt.Engine(
+        os.path.join(trt_engine_path, "vit.engine"))
+    policy.model.backbone.llm_engine = trt.Engine(
+        os.path.join(trt_engine_path, "llm.engine"))
 
     # Setup action head engines
     policy.model.action_head.vlln_vl_self_attention_engine = trt.Engine(
@@ -236,13 +266,15 @@ def setup_tensorrt_engines(policy, trt_engine_path):
     policy.model.action_head.action_decoder_engine = trt.Engine(
         os.path.join(trt_engine_path, "action_decoder.engine")
     )
-    policy.model.action_head.DiT_engine = trt.Engine(os.path.join(trt_engine_path, "DiT.engine"))
+    policy.model.action_head.DiT_engine = trt.Engine(
+        os.path.join(trt_engine_path, "DiT.engine"))
     policy.model.action_head.state_encoder_engine = trt.Engine(
         os.path.join(trt_engine_path, "state_encoder.engine")
     )
 
     # Set TensorRT forward functions
-    policy.model.backbone.forward = partial(eagle_tensorrt_forward, policy.model.backbone)
+    policy.model.backbone.forward = partial(
+        eagle_tensorrt_forward, policy.model.backbone)
     policy.model.action_head.get_action = partial(
         action_head_tensorrt_forward, policy.model.action_head
     )
@@ -251,9 +283,9 @@ def setup_tensorrt_engines(policy, trt_engine_path):
 def setup_denoising_subgraph_engine(policy, trt_engine_path):
     """
     Setup TensorRT engines for GR00T model inference using integrated denoising subgraph.
-    
+
     This replaces the multi-engine action head with a single denoising subgraph engine.
-    
+
     Args:
         policy: GR00T policy model instance
         trt_engine_path: Path to TensorRT engines directory
@@ -261,7 +293,7 @@ def setup_denoising_subgraph_engine(policy, trt_engine_path):
     policy.model.backbone.num_patches = (
         policy.model.backbone.eagle_model.vision_model.vision_model.embeddings.num_patches
     )
-    
+
     # Clean up PyTorch modules that will be replaced by TensorRT engines
     if hasattr(policy.model.backbone.eagle_model, "vision_model"):
         del policy.model.backbone.eagle_model.vision_model
@@ -284,8 +316,10 @@ def setup_denoising_subgraph_engine(policy, trt_engine_path):
     print("Denoising subgraph engine setup complete")
 
     # Setup backbone engines (same as before)
-    policy.model.backbone.vit_engine = trt.Engine(os.path.join(trt_engine_path, "vit.engine"))
-    policy.model.backbone.llm_engine = trt.Engine(os.path.join(trt_engine_path, "llm.engine"))
+    policy.model.backbone.vit_engine = trt.Engine(
+        os.path.join(trt_engine_path, "vit.engine"))
+    policy.model.backbone.llm_engine = trt.Engine(
+        os.path.join(trt_engine_path, "llm.engine"))
 
     # Setup single denoising subgraph engine (replaces all action head engines)
     policy.model.action_head.denoising_subgraph_engine = trt.Engine(
@@ -293,7 +327,8 @@ def setup_denoising_subgraph_engine(policy, trt_engine_path):
     )
 
     # Set TensorRT forward functions
-    policy.model.backbone.forward = partial(eagle_tensorrt_forward, policy.model.backbone)
+    policy.model.backbone.forward = partial(
+        eagle_tensorrt_forward, policy.model.backbone)
     policy.model.action_head.get_action = partial(
         denoising_subgraph_tensorrt_forward, policy.model.action_head
     )

@@ -179,11 +179,7 @@ def log_prediction_stats(predictions, mode_name, prediction_count=1):
                         f"mean: {tensor_array.mean():.3f}]"
                     )
 
-
-<< << << < HEAD
                     print(f"    Values: {tensor_array.flatten()[:5]}")
-== == == =
->>>>>> > frlai/export_tokenizer_improc
                 else:
                     print(
                         f"  {tensor_name}: {tensor_array.shape} {tensor_array.dtype} [empty]")
@@ -242,7 +238,8 @@ def compare_predictions(pred_tensorrt, pred_torch):
         l1_dist = torch.abs(flat_tensorrt - flat_torch)
 
         print(f"\n{key}:")
-        print(f'{"Cosine Similarity (PyTorch/TensorRT):".ljust(max_label_width)} {cos_sim.item()}')
+        print(
+            f'{"Cosine Similarity (PyTorch/TensorRT):".ljust(max_label_width)} {cos_sim.item()}')
         print(
             f'{"L1 Mean/Max Distance (PyTorch/TensorRT):".ljust(max_label_width)} {l1_dist.mean().item():.4f}/{l1_dist.max().item():.4f}'
         )
@@ -286,13 +283,27 @@ if __name__ == "__main__":
         action="store_true",
         help="Use synthetic data instead of dataset data for more controlled testing",
     )
+
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        help="Path to the dataset",
+        default="demo_data/robot_sim.PickNPlace",
+    )
+
+    parser.add_argument(
+        "--embodiment_tag",
+        type=str,
+        help="Embodiment tag",
+        default="gr1",
+    )
+
     args = parser.parse_args()
 
     MODEL_PATH = args.model_path
     REPO_PATH = os.path.dirname(os.path.dirname(gr00t.__file__))
-    DATASET_PATH = os.path.join(REPO_PATH, "demo_data/robot_sim.PickNPlace")
-    EMBODIMENT_TAG = "gr1"
-
+    DATASET_PATH = os.path.join(REPO_PATH, args.dataset_path)
+    EMBODIMENT_TAG = args.embodiment_tag
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     data_config = DATA_CONFIG_MAP["fourier_gr1_arms_only"]
@@ -312,7 +323,7 @@ if __name__ == "__main__":
     dataset = LeRobotSingleDataset(
         dataset_path=DATASET_PATH,
         modality_configs=modality_config,
-        video_backend="decord",
+        video_backend="torchvision_av",
         video_backend_kwargs=None,
         transforms=None,  # We'll handle transforms separately through the policy
         embodiment_tag=EMBODIMENT_TAG,
@@ -325,7 +336,7 @@ if __name__ == "__main__":
     else:
         print("Using dataset sample for input")
         step_data = dataset[0]
-    
+
     # Log input data statistics
     print("\n=== Input Data Statistics ===")
     for key, value in step_data.items():
@@ -341,27 +352,31 @@ if __name__ == "__main__":
                         print(f"    Min: {value.min():.6f}")
                         print(f"    Max: {value.max():.6f}")
                 elif value.size > 0:
-                    print(f"  {key}: {value.shape} {value.dtype} [min: {value.min():.3f}, max: {value.max():.3f}, mean: {value.mean():.3f}]")
+                    print(
+                        f"  {key}: {value.shape} {value.dtype} [min: {value.min():.3f}, max: {value.max():.3f}, mean: {value.mean():.3f}]")
                 else:
                     print(f"  {key}: {value.shape} {value.dtype}")
         else:
             print(f"  {key}: {type(value)} = {value}")
-    
+
     prediction_count = 1
 
     if args.inference_mode == "pytorch":
         torch.cuda.manual_seed(42)
         if not hasattr(policy.model.action_head, "init_actions"):
             policy.model.action_head.init_actions = torch.randn(
-                (1, policy.model.action_head.action_horizon, policy.model.action_head.action_dim),
+                (1, policy.model.action_head.action_horizon,
+                 policy.model.action_head.action_dim),
                 dtype=torch.float16,
                 device=device,
             )
             print(f"\n=== Generated init_actions ===")
             print(f"  Shape: {policy.model.action_head.init_actions.shape}")
-            print(f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
+            print(
+                f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
 
-        print(f"  num_inference_timesteps: {policy.model.action_head.num_inference_timesteps}")
+        print(
+            f"  num_inference_timesteps: {policy.model.action_head.num_inference_timesteps}")
         predicted_action = policy.get_action(step_data)
         log_prediction_stats(predicted_action, "PyTorch", prediction_count)
 
@@ -370,7 +385,8 @@ if __name__ == "__main__":
         torch.cuda.manual_seed(42)
         if not hasattr(policy.model.action_head, "init_actions"):
             policy.model.action_head.init_actions = torch.randn(
-                (1, policy.model.action_head.action_horizon, policy.model.action_head.action_dim),
+                (1, policy.model.action_head.action_horizon,
+                 policy.model.action_head.action_dim),
                 dtype=torch.float16,
                 device=device,
             )
@@ -384,24 +400,28 @@ if __name__ == "__main__":
         torch.cuda.manual_seed(42)
         if not hasattr(policy.model.action_head, "init_actions"):
             policy.model.action_head.init_actions = torch.randn(
-                (1, policy.model.action_head.action_horizon, policy.model.action_head.action_dim),
+                (1, policy.model.action_head.action_horizon,
+                 policy.model.action_head.action_dim),
                 dtype=torch.float16,
                 device=device,
             )
             print(f"\n=== Generated init_actions ===")
             print(f"  Shape: {policy.model.action_head.init_actions.shape}")
-            print(f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
+            print(
+                f"  Mean: {policy.model.action_head.init_actions.mean():.6f}")
         # PyTorch inference
         policy.model.action_head.get_action = partial(
             action_head_pytorch_forward, policy.model.action_head
         )
         predicted_action_torch = policy.get_action(step_data)
-        log_prediction_stats(predicted_action_torch, "PyTorch", prediction_count)
+        log_prediction_stats(predicted_action_torch,
+                             "PyTorch", prediction_count)
 
         # Setup TensorRT engines and run inference
         setup_denoising_subgraph_engine(policy, args.trt_engine_path)
         predicted_action_tensorrt = policy.get_action(step_data)
-        log_prediction_stats(predicted_action_tensorrt, "TensorRT", prediction_count)
+        log_prediction_stats(predicted_action_tensorrt,
+                             "TensorRT", prediction_count)
 
         # Compare predictions
         compare_predictions(predicted_action_tensorrt, predicted_action_torch)
