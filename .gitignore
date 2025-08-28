@@ -125,3 +125,7 @@ output/
 hand_wave/g1_wave
 hand_wave/GR00T-N1.5-3B-WaveHand-Dev
 saved_models
+
+# Additional ignores
+hand_wave/
+deployment_scripts/utils.py
