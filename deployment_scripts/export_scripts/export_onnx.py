@@ -64,11 +64,12 @@ def export_eagle2_vit(vision_model, output_dir):
             config._attn_implementation = "eager"
             super().__init__(config)
             self.embeddings = SiglipVisionEmbeddingsOpt(config)
+            self.register_buffer(
+                "position_ids", torch.arange(self.embeddings.num_patches, device="cuda").expand((1, -1)).to(torch.int32))
 
         def forward(
             self,
             pixel_values,
-            position_ids,  # Pass position_ids as input
             output_attentions: Optional[bool] = None,
             output_hidden_states: Optional[bool] = None,
             interpolate_pos_encoding: Optional[bool] = False,
@@ -86,7 +87,7 @@ def export_eagle2_vit(vision_model, output_dir):
 
             hidden_states = self.embeddings(
                 pixel_values,
-                position_ids=position_ids,
+                position_ids=self.position_ids,
                 interpolate_pos_encoding=interpolate_pos_encoding,
             )
 
@@ -102,7 +103,7 @@ def export_eagle2_vit(vision_model, output_dir):
             return last_hidden_state
 
     model = SiglipVisionTransformerOpt(vision_model.config).to(torch.float16)
-    model.load_state_dict(vision_model.state_dict())
+    model.load_state_dict(vision_model.state_dict(), strict=False)
     model.eval().cuda()
 
     pixel_values = torch.randn(
@@ -111,25 +112,20 @@ def export_eagle2_vit(vision_model, output_dir):
         dtype=torch.float32,
         device="cuda",
     )
-    position_ids = torch.arange(
-        model.embeddings.num_patches, device="cuda").expand((1, -1)).to(torch.int32)
-
-    print(position_ids.shape, position_ids.dtype)
 
     os.makedirs(output_dir, exist_ok=True)
     with torch.inference_mode():
         torch.onnx.export(
             model,
-            (pixel_values, position_ids),  # Include position_ids in ONNX export
+            (pixel_values),  # Include position_ids in ONNX export
             f"{output_dir}/eagle2/vit.onnx",
             # Add position_ids to input names
-            input_names=["pixel_values", "position_ids"],
+            input_names=["pixel_values"],
             output_names=["vit_embeds"],
             opset_version=19,
             do_constant_folding=True,
             dynamic_axes={
                 "pixel_values": {0: "batch_size"},
-                "position_ids": {0: "batch_size"},
                 "vit_embeds": {0: "batch_size"},
             },
         )

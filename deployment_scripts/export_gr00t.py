@@ -1,10 +1,11 @@
 import argparse
 import os
-
+import torch
+import onnxruntime
 from gr00t.data.dataset import LeRobotSingleDataset
 from gr00t.experiment.data_config import DATA_CONFIG_MAP
 from gr00t.model.policy import Gr00tPolicy
-
+from export_scripts.utils.export_utils import batch_tensorize_and_split
 import sys
 
 # Ensure export_scripts can be imported as a package from anywhere
@@ -91,6 +92,69 @@ def export_gr00t(policy: Gr00tPolicy, dataset: LeRobotSingleDataset, onnx_model_
     )
 
 
+def run_exported_gr00t(dataset: LeRobotSingleDataset, save_model_path: str,
+                       video_inputs, state_inputs):
+    preprocess_video_path = os.path.join(
+        save_model_path, "preprocess", "preprocess_video.pt")
+    preprocess_state_action_path = os.path.join(
+        save_model_path, "preprocess", "preprocess_state_action.pt")
+    eagle_2_tokenizer_path = os.path.join(
+        save_model_path, "preprocess", "eagle2_tokenizer.pt")
+    postprocess_modules_path = os.path.join(
+        save_model_path, "postprocess", "postprocess_modules.pt")
+
+    vit_path = os.path.join(save_model_path, "eagle2", "vit.onnx")
+    llm_path = os.path.join(save_model_path, "eagle2", "llm.onnx")
+
+    denoising_subgraph_path = os.path.join(
+        save_model_path, "action_head", "denoising_subgraph.onnx")
+
+    preprocess_video = torch.jit.load(preprocess_video_path)
+    preprocess_state_action = torch.jit.load(preprocess_state_action_path)
+    eagle_2_tokenizer = torch.jit.load(eagle_2_tokenizer_path)
+    postprocess_modules = torch.jit.load(postprocess_modules_path)
+
+    vit = onnxruntime.InferenceSession(vit_path)
+    llm = onnxruntime.InferenceSession(llm_path)
+    denoising_subgraph = onnxruntime.InferenceSession(denoising_subgraph_path)
+
+    preprocessed_state = preprocess_state_action(state_inputs)
+
+    preprocessed_video = preprocess_video(video_inputs)
+
+    eagle_2_tokenizer_outputs = eagle_2_tokenizer(preprocessed_video)
+
+    vit_inputs = {
+        "pixel_values": eagle_2_tokenizer_outputs["eagle_pixel_values"].cpu().numpy()
+    }
+
+    vit_outputs = vit.run(None, vit_inputs)
+    llm_inputs = {
+        "vit_embeds": vit_outputs[0],
+        "attention_mask": eagle_2_tokenizer_outputs["eagle_attention_mask"].cpu().numpy(),
+        "input_ids": eagle_2_tokenizer_outputs["eagle_input_ids"].cpu().numpy(),
+    }
+    llm_outputs = llm.run(None, llm_inputs)
+
+    denoising_subgraph_inputs = {
+        "embeddings": llm_outputs[0],
+        "state": preprocessed_state["state"].cpu().numpy(),
+        "embodiment_id": eagle_2_tokenizer_outputs["embodiment_id"].cpu().numpy(),
+    }
+
+    denoising_subgraph_outputs = denoising_subgraph.run(
+        None, denoising_subgraph_inputs)
+
+    postprocess_modules_inputs = {
+        "action": torch.from_numpy(
+            denoising_subgraph_outputs[0]).cuda()
+    }
+    postprocess_modules_outputs = postprocess_modules(
+        postprocess_modules_inputs)
+
+    return postprocess_modules_outputs
+
+
 if __name__ == "__main__":
     # Make sure you have logged in to huggingface using `huggingface-cli login` with your nvidia email.
     parser = argparse.ArgumentParser(description="Run Groot Inference")
@@ -122,5 +186,8 @@ if __name__ == "__main__":
 
     policy, dataset = get_policy_and_dataset(
         args.dataset_path, args.model_path)
-
+    video_inputs, state_inputs, _, _ = batch_tensorize_and_split(
+        dataset[0])
     export_gr00t(policy, dataset, args.save_model_path)
+    resutls = run_exported_gr00t(
+        dataset, args.save_model_path, video_inputs, state_inputs)
