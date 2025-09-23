@@ -5,6 +5,7 @@ from deployment_scripts.utils import DATA_CONFIG_MAP
 from deployment_scripts.export_gr00t import export_gr00t
 from deployment_scripts.export_gr00t import ExportedGr00tRunner
 from deployment_scripts.export_scripts.verification import plot_action_distribution
+from leapp import assembler
 
 
 def get_policy_and_dataset(dataset_path: str = '/home/binliu/groot/dataset/g1_wave',
@@ -45,8 +46,10 @@ if __name__ == "__main__":
     )
 
     # export_gr00t(policy, dataset, "handwave_model")
-    plot_action_distribution(
-        policy, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/python")
+    # plot_action_distribution(
+    #     policy, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/python")
     runner = ExportedGr00tRunner("handwave_model")
-    plot_action_distribution(
-        runner, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/onnx")
+    # plot_action_distribution(
+    #     runner, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/onnx")
+
+    runner.get_action(dataset[0])
