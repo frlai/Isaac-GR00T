@@ -1,12 +1,12 @@
-import argparse
 import os
 import torch
 import onnxruntime
 from gr00t.data.dataset import LeRobotSingleDataset
 from gr00t.experiment.data_config import DATA_CONFIG_MAP
 from gr00t.model.policy import Gr00tPolicy
-from export_scripts.utils.export_utils import batch_tensorize_and_split
+from deployment_scripts.export_scripts.utils.export_utils import batch_tensorize_and_split
 import sys
+from leapp import annotate
 
 # Ensure export_scripts can be imported as a package from anywhere
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -43,11 +43,11 @@ def get_policy_and_dataset(dataset_path: str, model_path: str, device: str = "cu
 
 
 def export_gr00t(policy: Gr00tPolicy, dataset: LeRobotSingleDataset, onnx_model_path: str):
-    from export_scripts.utils.export_utils import get_input_info
-    from export_scripts.export_denoising_subgraph_onnx import export_denoising_subgraph
-    from export_scripts.export_postprocess import export_and_test_postprocess
-    from export_scripts.export_preprocess import export_and_test_preprocess
-    from export_scripts.export_onnx import export_onnx
+    from deployment_scripts.export_scripts.utils.export_utils import get_input_info
+    from deployment_scripts.export_scripts.export_denoising_subgraph_onnx import export_denoising_subgraph
+    from deployment_scripts.export_scripts.export_postprocess import export_and_test_postprocess
+    from deployment_scripts.export_scripts.export_preprocess import export_and_test_preprocess
+    from deployment_scripts.export_scripts.export_onnx import export_onnx
     # export the preprocess model
     preprocess_model_path = os.path.join(
         onnx_model_path, "preprocess")
@@ -95,84 +95,147 @@ def export_gr00t(policy: Gr00tPolicy, dataset: LeRobotSingleDataset, onnx_model_
 class ExportedGr00tRunner:
     def __init__(self, save_model_path: str):
         self.save_model_path = save_model_path
-        self.preprocess_video = torch.jit.load(os.path.join(
-            save_model_path, "preprocess", "preprocess_video.pt"))
-        self.preprocess_state_action = torch.jit.load(os.path.join(
-            save_model_path, "preprocess", "preprocess_state_action.pt"))
-        self.eagle_2_tokenizer = torch.jit.load(os.path.join(
-            save_model_path, "preprocess", "eagle2_tokenizer.pt"))
-        self.postprocess_modules = torch.jit.load(os.path.join(
-            save_model_path, "postprocess", "postprocess_modules.pt"))
-        self.vit = onnxruntime.InferenceSession(os.path.join(
-            save_model_path, "eagle2", "vit.onnx"))
-        self.llm = onnxruntime.InferenceSession(os.path.join(
-            save_model_path, "eagle2", "llm.onnx"))
-        self.denoising_subgraph = onnxruntime.InferenceSession(os.path.join(
-            save_model_path, "action_head", "denoising_subgraph.onnx"))
+        self.preprocess_video_path = os.path.join(
+            save_model_path, "preprocess", "preprocess_video.pt")
+        self.preprocess_state_action_path = os.path.join(
+            save_model_path, "preprocess", "preprocess_state_action.pt")
+        self.eagle_2_tokenizer_path = os.path.join(
+            save_model_path, "preprocess", "eagle2_tokenizer.pt")
+        self.postprocess_modules_path = os.path.join(
+            save_model_path, "postprocess", "postprocess_modules.pt")
+        self.vit_path = os.path.join(
+            save_model_path, "eagle2", "vit.onnx")
+        self.llm_path = os.path.join(
+            save_model_path, "eagle2", "llm.onnx")
+        self.denoising_subgraph_path = os.path.join(
+            save_model_path, "action_head", "denoising_subgraph.onnx")
+
+        self._preprocess_video = torch.jit.load(self.preprocess_video_path)
+        self._preprocess_state_action = torch.jit.load(
+            self.preprocess_state_action_path)
+        self._eagle_2_tokenizer = torch.jit.load(self.eagle_2_tokenizer_path)
+        self._postprocess_modules = torch.jit.load(
+            self.postprocess_modules_path)
+        # Set up execution providers for GPU acceleration
+        # Force GPU execution only - fail fast if GPU unavailable
+        providers = ['CUDAExecutionProvider']
+
+        self._vit = onnxruntime.InferenceSession(
+            self.vit_path, providers=providers)
+        self._llm = onnxruntime.InferenceSession(
+            self.llm_path, providers=providers)
+        self._denoising_subgraph = onnxruntime.InferenceSession(
+            self.denoising_subgraph_path, providers=providers)
+
+        # Apply decorators with backend_params after initialization
+        self._apply_decorators()
+
+    def _apply_decorators(self):
+        """Apply decorators with backend_params containing model paths"""
+        # Apply decorator to preprocess_state_action
+        self.preprocess_state_action = annotate.method(
+            backend_params={"model_path": self.preprocess_state_action_path}
+        )(self.preprocess_state_action)
+
+        # Apply decorator to preprocess_video
+        self.preprocess_video = annotate.method(
+            backend_params={"model_path": self.preprocess_video_path}
+        )(self.preprocess_video)
+
+        # Apply decorator to eagle_2_tokenizer
+        self.eagle_2_tokenizer = annotate.method(
+            node_name="tokenizer",
+            backend_params={"model_path": self.eagle_2_tokenizer_path}
+        )(self.eagle_2_tokenizer)
+
+        # Apply decorator to vit
+        self.vit = annotate.method(
+            node_name="vit_engine",
+            backend_params={"model_path": self.vit_path}
+        )(self.vit)
+
+        # Apply decorator to llm
+        self.llm = annotate.method(
+            node_name="llm_engine",
+            backend_params={"model_path": self.llm_path}
+        )(self.llm)
+
+        # Apply decorator to denoising_subgraph
+        self.denoising_subgraph = annotate.method(
+            backend_params={"model_path": self.denoising_subgraph_path}
+        )(self.denoising_subgraph)
+
+        # Apply decorator to postprocess_modules
+        self.postprocess_modules = annotate.method(
+            backend_params={"model_path": self.postprocess_modules_path}
+        )(self.postprocess_modules)
+
+    def preprocess_state_action(self, state_inputs):
+        preprocessed_state = self._preprocess_state_action(state_inputs)
+        return preprocessed_state
+
+    def preprocess_video(self, video_inputs):
+        preprocessed_video = self._preprocess_video(video_inputs)
+        return preprocessed_video
+
+    def eagle_2_tokenizer(self, eagle_2_tokenizer_inputs):
+        eagle_2_tokenizer_outputs = self._eagle_2_tokenizer(
+            eagle_2_tokenizer_inputs)
+        return eagle_2_tokenizer_outputs
+
+    def vit(self, eagle_pixel_values):
+        vit_inputs = {
+            "pixel_values": eagle_pixel_values.cpu().numpy(),
+        }
+        vit_embeds = self._vit.run(None, vit_inputs)[0]
+        vit_embeds = torch.from_numpy(vit_embeds)
+        return vit_embeds
+
+    def llm(self, eagle_input_ids, eagle_attention_mask, vit_embeds):
+        llm_inputs = {
+            "input_ids": eagle_input_ids.cpu().numpy(),
+            "attention_mask": eagle_attention_mask.cpu().numpy(),
+            "vit_embeds": vit_embeds.cpu().numpy(),
+        }
+        embeddings = self._llm.run(None, llm_inputs)[0]
+        embeddings = torch.from_numpy(embeddings)
+        return embeddings
+
+    def denoising_subgraph(self, embeddings, state, embodiment_id):
+        denoising_subgraph_inputs = {
+            "embeddings": embeddings.cpu().numpy(),
+            "state": state.cpu().numpy(),
+            "embodiment_id": embodiment_id.cpu().numpy(),
+        }
+        action = self._denoising_subgraph.run(
+            None, denoising_subgraph_inputs)[0]
+        action = torch.from_numpy(action)
+        action = {
+            "action": action.cuda(),
+        }
+        return action
+
+    def postprocess_modules(self, action):
+        action = self._postprocess_modules(action)
+        return action
 
     def get_action(self, data):
         video_inputs, state_inputs, _, _ = batch_tensorize_and_split(data)
+        for k in video_inputs:
+            video_inputs[k] = video_inputs[k].to(torch.float32)
+        for k in state_inputs:
+            state_inputs[k] = state_inputs[k].to(torch.float32)
 
         preprocessed_state = self.preprocess_state_action(state_inputs)
         preprocessed_video = self.preprocess_video(video_inputs)
-        eagle_2_tokenizer_outputs = self.eagle_2_tokenizer(preprocessed_video)
-        vit_inputs = {
-            "pixel_values": eagle_2_tokenizer_outputs["eagle_pixel_values"].cpu().numpy()
-        }
-        vit_outputs = self.vit.run(None, vit_inputs)
-        llm_inputs = {
-            "vit_embeds": vit_outputs[0],
-            "attention_mask": eagle_2_tokenizer_outputs["eagle_attention_mask"].cpu().numpy(),
-            "input_ids": eagle_2_tokenizer_outputs["eagle_input_ids"].cpu().numpy(),
-        }
-        llm_outputs = self.llm.run(None, llm_inputs)
-        denoising_subgraph_inputs = {
-            "embeddings": llm_outputs[0],
-            "state": preprocessed_state["state"].cpu().numpy(),
-            "embodiment_id": eagle_2_tokenizer_outputs["embodiment_id"].cpu().numpy(),
-        }
-        denoising_subgraph_outputs = self.denoising_subgraph.run(
-            None, denoising_subgraph_inputs)
-        postprocess_modules_inputs = {
-            "action": torch.from_numpy(
-                denoising_subgraph_outputs[0]).cuda()
-        }
-        postprocess_modules_outputs = self.postprocess_modules(
-            postprocess_modules_inputs)
+        eagle_2_tokenizer_outputs = self.eagle_2_tokenizer(
+            preprocessed_video)
+        vit_embeds = self.vit(eagle_2_tokenizer_outputs['eagle_pixel_values'])
+        embeddings = self.llm(eagle_2_tokenizer_outputs['eagle_input_ids'],
+                              eagle_2_tokenizer_outputs['eagle_attention_mask'],
+                              vit_embeds)
+        action = self.denoising_subgraph(
+            embeddings, preprocessed_state['state'], eagle_2_tokenizer_outputs['embodiment_id'])
+        postprocess_modules_outputs = self.postprocess_modules(action)
+
         return postprocess_modules_outputs
-
-
-if __name__ == "__main__":
-    # Make sure you have logged in to huggingface using `huggingface-cli login` with your nvidia email.
-    parser = argparse.ArgumentParser(description="Run Groot Inference")
-    parser.add_argument(
-        "--dataset_path",
-        type=str,
-        help="Path to the dataset",
-        default=os.path.join(os.getcwd(), "demo_data/robot_sim.PickNPlace"),
-    )
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        help="Path to the model",
-        default="nvidia/GR00T-N1.5-3B",
-    )
-
-    parser.add_argument(
-        "--save_model_path",
-        type=str,
-        help="Path where the exported artifacts will be stored",
-        default=os.path.join(os.getcwd(), "saved_models"),
-    )
-
-    args = parser.parse_args()
-
-    print(f"Dataset path: {args.dataset_path}")
-    print(f"Model path: {args.model_path}")
-    print(f"Save model path: {args.save_model_path}")
-
-    policy, dataset = get_policy_and_dataset(
-        args.dataset_path, args.model_path)
-    # export_gr00t(policy, dataset, args.save_model_path)
-    exported_gr00t_runner = ExportedGr00tRunner(args.save_model_path)
-    resutls = exported_gr00t_runner.get_action(dataset[0])
