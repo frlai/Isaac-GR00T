@@ -5,7 +5,6 @@
 .Python
 build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -27,7 +26,6 @@ MANIFEST
 .mypy_cache
 *.egg-info/
 build/
-dist/
 pip-wheel-metadata/
 
 
@@ -95,7 +93,6 @@ hostfile
 __pycache__
 *.pyc
 *.egg-info
-dist
 
 # Log
 *.log
