@@ -1,11 +1,10 @@
-import argparse
 import os
 import torch
 import onnxruntime
 from gr00t.data.dataset import LeRobotSingleDataset
 from gr00t.experiment.data_config import DATA_CONFIG_MAP
 from gr00t.model.policy import Gr00tPolicy
-from export_scripts.utils.export_utils import batch_tensorize_and_split
+from deployment_scripts.export_scripts.utils.export_utils import batch_tensorize_and_split
 import sys
 from leapp import annotate
 
@@ -44,11 +43,11 @@ def get_policy_and_dataset(dataset_path: str, model_path: str, device: str = "cu
 
 
 def export_gr00t(policy: Gr00tPolicy, dataset: LeRobotSingleDataset, onnx_model_path: str):
-    from export_scripts.utils.export_utils import get_input_info
-    from export_scripts.export_denoising_subgraph_onnx import export_denoising_subgraph
-    from export_scripts.export_postprocess import export_and_test_postprocess
-    from export_scripts.export_preprocess import export_and_test_preprocess
-    from export_scripts.export_onnx import export_onnx
+    from deployment_scripts.export_scripts.utils.export_utils import get_input_info
+    from deployment_scripts.export_scripts.export_denoising_subgraph_onnx import export_denoising_subgraph
+    from deployment_scripts.export_scripts.export_postprocess import export_and_test_postprocess
+    from deployment_scripts.export_scripts.export_preprocess import export_and_test_preprocess
+    from deployment_scripts.export_scripts.export_onnx import export_onnx
     # export the preprocess model
     preprocess_model_path = os.path.join(
         onnx_model_path, "preprocess")
@@ -240,39 +239,3 @@ class ExportedGr00tRunner:
         postprocess_modules_outputs = self.postprocess_modules(action)
 
         return postprocess_modules_outputs
-
-
-if __name__ == "__main__":
-    # Make sure you have logged in to huggingface using `huggingface-cli login` with your nvidia email.
-    parser = argparse.ArgumentParser(description="Run Groot Inference")
-    parser.add_argument(
-        "--dataset_path",
-        type=str,
-        help="Path to the dataset",
-        default=os.path.join(os.getcwd(), "demo_data/robot_sim.PickNPlace"),
-    )
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        help="Path to the model",
-        default="nvidia/GR00T-N1.5-3B",
-    )
-
-    parser.add_argument(
-        "--save_model_path",
-        type=str,
-        help="Path where the exported artifacts will be stored",
-        default=os.path.join(os.getcwd(), "saved_models"),
-    )
-
-    args = parser.parse_args()
-
-    print(f"Dataset path: {args.dataset_path}")
-    print(f"Model path: {args.model_path}")
-    print(f"Save model path: {args.save_model_path}")
-
-    policy, dataset = get_policy_and_dataset(
-        args.dataset_path, args.model_path)
-    # export_gr00t(policy, dataset, args.save_model_path)
-    exported_gr00t_runner = ExportedGr00tRunner(args.save_model_path)
-    resutls = exported_gr00t_runner.get_action(dataset[0])

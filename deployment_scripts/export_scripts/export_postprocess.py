@@ -6,9 +6,7 @@ from .utils import gr00t_transform_modules as export_gr00t_state_action
 
 from .utils.export_utils import ComposedGr00tModule
 from .utils.export_utils import test_gr00t_process_consistency
-from .utils.export_utils import describe_io
 from gr00t.data.transform.base import InvertibleModalityTransform
-import yaml
 
 
 def get_unprocessed_action(policy, observations):
@@ -61,15 +59,7 @@ def export_and_test_postprocess(data, policy, model_path):
     traced_postprocess_modules = torch.jit.load(
         os.path.join(model_path, "postprocess_modules.pt"))
 
-    input_description, input_format = describe_io(output_export)
     output_export = traced_postprocess_modules(output_export)
-    output_description, output_format = describe_io(output_export)
-    describe_postprocess_inputs = {"inference": {"input_nodes": input_description,
-                                                 "output_nodes": output_description,
-                                                 "input_format": [input_format],
-                                                 "output_format": output_format}}
-    yaml.dump(describe_postprocess_inputs, open(
-        model_path+"/postprocess_modules.yaml", "w"))
 
     output_gr00t = policy._get_unnormalized_action(output_gr00t)
 

@@ -62,42 +62,6 @@ def map_from_torch_dtype(dtype):
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
 
-
-def describe_io_helper(data, name_str):
-    data_description = {}
-    if isinstance(data, list):
-        format = []
-        for idx, item in enumerate(data):
-            child_description, child_format = describe_io_helper(
-                item, name_str+str(idx))
-            format.append(child_format)
-            data_description = {**data_description, **child_description}
-        return data_description, format
-    elif isinstance(data, dict):
-        format = {}
-        for k, v in data.items():
-            child_description, child_format = describe_io_helper(v, name_str+k)
-            format[k] = child_format
-            data_description = {**data_description, **child_description}
-    elif isinstance(data, torch.Tensor):
-        data_description[name_str] = {
-            "dtype": map_from_torch_dtype(data.dtype),
-            "dim": " ".join(str(int(x)) for x in data.shape)
-        }
-        format = name_str
-    else:
-        data_description[name_str] = type(data)
-        format = name_str
-
-    return data_description, format
-
-
-def describe_io(data):
-    data_description = {}
-    format = None
-    data_description, format = describe_io_helper(data, "")
-    return data_description, format
-
 # Convert all non-tensor values to tensors
 
 

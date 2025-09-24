@@ -6,10 +6,9 @@ from .utils import gr00t_tokenizer as export_gr00t_video_language
 from .utils import video_language_transfrom_module as export_eagle2_video_language
 
 import torch
-import copy
 from .utils.export_utils import batch_tensorize_and_split
 from .utils.export_utils import ComposedGr00tModule
-from .utils.export_utils import describe_io, test_gr00t_process_consistency
+from .utils.export_utils import test_gr00t_process_consistency
 from .utils.export_utils import get_input_info
 import os
 import yaml
@@ -17,14 +16,13 @@ import yaml
 
 def export_and_test_preprocess(data, policy, model_path):
     # use different data to trace and test the model
-    video_inputs, state_inputs, action_inputs, language_inputs = batch_tensorize_and_split(
+    video_inputs, state_inputs, _, language_inputs = batch_tensorize_and_split(
         data)
     output_gr00t = dict(data)
 
     output_gr00t = get_input_info(policy, data)
     state_action_module = ComposedGr00tModule()
     video_module = ComposedGr00tModule()
-    eagle2_video_module = ComposedGr00tModule()
     for idx, preprocessing_step in enumerate(policy._modality_transform.transforms):
         params = preprocessing_step.__dict__
         # Get the class name of the preprocessing step
@@ -88,16 +86,8 @@ def export_and_test_preprocess(data, policy, model_path):
     traced_state_action_module = torch.jit.load(
         os.path.join(model_path, "preprocess_state_action.pt"))
 
-    input_description, input_format = describe_io(state_inputs)
     state_action_output_export = traced_state_action_module(
         state_inputs)
-    output_description, output_format = describe_io(state_action_output_export)
-    describe_state_action_inputs = {"inference": {"input_nodes": input_description,
-                                                  "output_nodes": output_description,
-                                                  "input_format": [input_format],
-                                                  "output_format": output_format}}
-    yaml.dump(describe_state_action_inputs, open(
-        model_path+"/preprocess_state_action.yaml", "w"))
 
     traced_video_module = torch.jit.trace(
         video_module, video_inputs, strict=False)
@@ -106,15 +96,7 @@ def export_and_test_preprocess(data, policy, model_path):
     traced_video_module = torch.jit.load(
         os.path.join(model_path, "preprocess_video.pt"))
 
-    input_description, input_format = describe_io(video_inputs)
     video_output = traced_video_module(video_inputs)
-    output_description, output_format = describe_io(video_output)
-    describe_video_inputs = {"inference": {"input_nodes": input_description,
-                                           "output_nodes": output_description,
-                                           "input_format": [input_format],
-                                           "output_format": output_format}}
-    yaml.dump(describe_video_inputs, open(
-        model_path+"/preprocess_video.yaml", "w"))
 
     video_language_inputs = {**video_output, **language_inputs}
 
@@ -123,31 +105,14 @@ def export_and_test_preprocess(data, policy, model_path):
     video_language_module = export_gr00t_video_language.GR00TTransform(
         **tokenizer_params)
 
-    input_description, input_format = describe_io(video_language_inputs)
-
     python_gr00t_output = video_language_module(video_language_inputs)
-    output_description, output_format = describe_io(python_gr00t_output)
-    describe_video_language_inputs = {"inference": {"input_nodes": input_description,
-                                                    "output_nodes": output_description,
-                                                    "input_format": [input_format],
-                                                    "output_format": output_format}}
-    yaml.dump(describe_video_language_inputs, open(
-        model_path+"/preprocess_video_language.yaml", "w"))
 
     scripted_module = torch.jit.script(eagle2_tokenizer)
     scripted_module.save(os.path.join(
         model_path, "eagle2_tokenizer.pt"))
     scripted_module = torch.jit.load(os.path.join(
         model_path, "eagle2_tokenizer.pt"))
-    input_description, input_format = describe_io(video_output)
     video_language_output = scripted_module(video_output)
-    output_description, output_format = describe_io(video_language_output)
-    describe_video_outputs = {"inference": {"input_nodes": input_description,
-                                            "output_nodes": output_description,
-                                            "input_format": [input_format],
-                                            "output_format": output_format}}
-    yaml.dump(describe_video_outputs, open(
-        model_path+"/eagle2_tokenizer.yaml", "w"))
 
     # Combine video_output and state_action_output_export into a single dictionary
     output_export = {**state_action_output_export, **video_language_output}

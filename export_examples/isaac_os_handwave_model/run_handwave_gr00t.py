@@ -1,7 +1,7 @@
 from gr00t.model.policy import Gr00tPolicy
 from gr00t.data.dataset import LeRobotSingleDataset
 # from gr00t.experiment.data_config import DATA_CONFIG_MAP
-from deployment_scripts.utils import DATA_CONFIG_MAP
+from utils import DATA_CONFIG_MAP
 from deployment_scripts.export_gr00t import export_gr00t
 from deployment_scripts.export_gr00t import ExportedGr00tRunner
 from deployment_scripts.export_scripts.verification import plot_action_distribution
