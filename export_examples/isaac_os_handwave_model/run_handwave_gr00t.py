@@ -1,3 +1,4 @@
+import os
 from gr00t.model.policy import Gr00tPolicy
 from gr00t.data.dataset import LeRobotSingleDataset
 # from gr00t.experiment.data_config import DATA_CONFIG_MAP
@@ -39,8 +40,12 @@ def get_policy_and_dataset(dataset_path: str = '/home/binliu/groot/dataset/g1_wa
 
 
 if __name__ == "__main__":
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    dataset_path = os.path.join(script_dir, 'g1_wave')
+
     policy, dataset = get_policy_and_dataset(
-        dataset_path='hand_wave/g1_wave',
+        dataset_path=dataset_path,
         model_path='nvidia/GR00T-N1.5-3B-WaveHand-Dev',
         device='cuda',
     )
@@ -49,7 +54,7 @@ if __name__ == "__main__":
 
     # load policy again because export process may change some policy backends
     policy, dataset = get_policy_and_dataset(
-        dataset_path='hand_wave/g1_wave',
+        dataset_path=dataset_path,
         model_path='nvidia/GR00T-N1.5-3B-WaveHand-Dev',
         device='cuda',
     )
