@@ -5,7 +5,7 @@ from deployment_scripts.utils import DATA_CONFIG_MAP
 from deployment_scripts.export_gr00t import export_gr00t
 from deployment_scripts.export_gr00t import ExportedGr00tRunner
 from deployment_scripts.export_scripts.verification import plot_action_distribution
-from leapp import assembler
+from leapp import annotate
 
 
 def get_policy_and_dataset(dataset_path: str = '/home/binliu/groot/dataset/g1_wave',
@@ -44,12 +44,27 @@ if __name__ == "__main__":
         model_path='nvidia/GR00T-N1.5-3B-WaveHand-Dev',
         device='cuda',
     )
+    print("****EXPORTING GR00T MODEL****")
+    export_gr00t(policy, dataset, "handwave_model")
 
-    # export_gr00t(policy, dataset, "handwave_model")
-    # plot_action_distribution(
-    #     policy, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/python")
+    # load policy again because export process may change some policy backends
+    policy, dataset = get_policy_and_dataset(
+        dataset_path='hand_wave/g1_wave',
+        model_path='nvidia/GR00T-N1.5-3B-WaveHand-Dev',
+        device='cuda',
+    )
+
+    print("****VALIDATING GR00T MODEL****")
+    plot_action_distribution(
+        policy, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/python")
+
+    print("****PROFILING EXPORTED MODEL")
+    print("****RESULTS MAY TAKE TIME IF YOU DON'T HAVE THE GPU EXECUTION PROVIDER IN ONNXRUNTIME****")
     runner = ExportedGr00tRunner("handwave_model")
-    # plot_action_distribution(
-    #     runner, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/onnx")
+    plot_action_distribution(
+        runner, dataset, plot_actions=["action.upper_body", "action.hands"], output_dir="./handwave_model/plots/onnx")
 
+    annotate.start(name="handwave_model")
     runner.get_action(dataset[0])
+    annotate.stop()
+    annotate.compile_graph()

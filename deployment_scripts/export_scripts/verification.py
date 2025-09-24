@@ -117,7 +117,7 @@ def load_and_visualize_tensors(tensor_np, save_plots=True, output_dir="./plots")
 def plot_action_distribution(policy, dataset, plot_actions, output_dir="./plots", iters=30):
     full_actions = []
     for i in range(iters):
-        print(f"computing {output_dir} actions for iteration {i}")
+        print(f"computing {output_dir} get_actions for iteration {i}")
         data = dataset[i]
         action_frame = policy.get_action(data)
 
