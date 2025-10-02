@@ -191,11 +191,11 @@ class ExportedGr00tRunner:
         vit_embeds = torch.from_numpy(vit_embeds)
         return vit_embeds
 
-    def llm(self, eagle_input_ids, eagle_attention_mask, vit_embeds):
+    def llm(self, eagle_input_ids, vit_embeds, eagle_attention_mask):
         llm_inputs = {
             "input_ids": eagle_input_ids.cpu().numpy(),
-            "attention_mask": eagle_attention_mask.cpu().numpy(),
             "vit_embeds": vit_embeds.cpu().numpy(),
+            "attention_mask": eagle_attention_mask.cpu().numpy(),
         }
         embeddings = self._llm.run(None, llm_inputs)[0]
         embeddings = torch.from_numpy(embeddings)
@@ -221,8 +221,6 @@ class ExportedGr00tRunner:
 
     def get_action(self, data):
         video_inputs, state_inputs, _, _ = batch_tensorize_and_split(data)
-        for k in video_inputs:
-            video_inputs[k] = video_inputs[k].to(torch.float32)
         for k in state_inputs:
             state_inputs[k] = state_inputs[k].to(torch.float32)
 
@@ -232,8 +230,7 @@ class ExportedGr00tRunner:
             preprocessed_video)
         vit_embeds = self.vit(eagle_2_tokenizer_outputs['eagle_pixel_values'])
         embeddings = self.llm(eagle_2_tokenizer_outputs['eagle_input_ids'],
-                              eagle_2_tokenizer_outputs['eagle_attention_mask'],
-                              vit_embeds)
+                              vit_embeds, eagle_2_tokenizer_outputs['eagle_attention_mask'])
         action = self.denoising_subgraph(
             embeddings, preprocessed_state['state'], eagle_2_tokenizer_outputs['embodiment_id'])
         postprocess_modules_outputs = self.postprocess_modules(action)
