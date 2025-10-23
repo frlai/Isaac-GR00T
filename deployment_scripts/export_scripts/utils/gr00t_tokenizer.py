@@ -114,7 +114,7 @@ class GR00TTransform(nn.Module):
     def _tokenize_with_processor(self, conversations: List[List[Dict[str, Any]]], device: torch.device) -> Dict[str, torch.Tensor]:
         # Build text list using chat templates
         text_list: List[str] = []
-        image_inputs_batch: List[Any] = []
+        image_inputs_flat: List[Any] = []
         for conv in conversations:
             # Some processors implement apply_chat_template/process_vision_info via remote code
             if hasattr(self.processor, "apply_chat_template"):
@@ -135,11 +135,16 @@ class GR00TTransform(nn.Module):
                 pil_images = [c["image"] for c in conv[0]["content"]
                               if isinstance(c, dict) and c.get("type") == "image"]
                 image_inputs = pil_images
-            image_inputs_batch.append(image_inputs)
+            # Flatten the image inputs - processor expects a flat list
+            if image_inputs is not None:
+                if isinstance(image_inputs, list):
+                    image_inputs_flat.extend(image_inputs)
+                else:
+                    image_inputs_flat.append(image_inputs)
 
         inputs = self.processor(
             text=text_list,
-            images=image_inputs_batch,
+            images=image_inputs_flat if len(image_inputs_flat) > 0 else None,
             return_tensors="pt",
             padding=True,
         )

@@ -289,15 +289,13 @@ class Eagle2VideoTransform(nn.Module):
                 processed_image_patches, dim=0)
 
             processed_frames.append(processed_image_patches_stacked)
-            image_sizes.append(torch.tensor([frame.shape[1], frame.shape[2]]))
+            image_sizes.append(torch.tensor([[frame.shape[1], frame.shape[2]]]))
 
         if self.do_pad:
             processed_frames = self._pad_for_batching(processed_frames)
 
         processed_frames_stacked = torch.cat(processed_frames, dim=0)
         image_sizes_stacked = torch.cat(image_sizes, dim=0)
-        if image_sizes_stacked.ndim == 1:
-            image_sizes_stacked = image_sizes_stacked.unsqueeze(0)
 
         image_sizes_stacked = image_sizes_stacked.to(
             processed_frames_stacked.device)
