@@ -39,64 +39,96 @@ pip install onnxruntime-gpu
 
 The repository provides two complete examples in the `export_examples/` directory that demonstrate the end-to-end workflow for generating IGG artifacts.
 
-### 2.1 Handwave Model Example (`isaac_os_handwave_model/`)
+### 2.1 General GR00T Model Export (`gr00t_model/`)
 
-This example demonstrates exporting a specialized handwave model:
+This example provides a flexible, command-line driven export script for any GR00T model:
 
-**Location**: `export_examples/isaac_os_handwave_model/run_handwave_gr00t.py`
+**Location**: `export_examples/gr00t_model/export_gr00t_model.py`
+
+**Key Features**:
+- Uses base `nvidia/GR00T-N1.5-3B` model (default)
+- Fully configurable via command-line arguments
+- Supports multiple embodiment configurations
+- Customizable video backends and validation options
+- Default configuration for Fourier GR1 arms
+
+**Usage**:
+```bash
+cd export_examples/gr00t_model
+python export_gr00t_model.py \
+    --dataset_path ../../demo_data/robot_sim.PickNPlace \
+    --model_path nvidia/GR00T-N1.5-3B \
+    --save_model_path gr00t_models \
+    --embodiment_tag gr1 \
+    --modality_config fourier_gr1_arms_only \
+    --video_backend decord \
+    --plot_actions action.left_arm action.right_arm \
+    --num_plot_steps 30
+```
+
+**Command-Line Arguments**:
+- `--dataset_path`: Path to demonstration dataset
+- `--model_path`: HuggingFace model ID or local path
+- `--save_model_path`: Output directory for exported artifacts
+- `--embodiment_tag`: Robot embodiment identifier (e.g., `gr1`, `new_embodiment`)
+- `--modality_config`: Data configuration preset (see `gr00t/experiment/data_config.py`)
+- `--video_backend`: Video decoder (`decord` or `torchvision_av`)
+- `--plot_actions`: Action keys to validate (e.g., `action.single_arm action.gripper`)
+- `--num_plot_steps`: Number of validation iterations (default: 30)
+
+### 2.2 Custom Modality Example - Handwave (`custom_modality/`)
+
+This example demonstrates exporting with custom modality configurations:
+
+**Location**: `export_examples/custom_modality/export_handwave_gr00t.py`
 
 **Key Features**:
 - Uses `nvidia/GR00T-N1.5-3B-WaveHand-Dev` model
-- Configured for Unitree G1 embodiment (`unitree_g1_v2`)
+- Configured for Unitree G1 embodiment with custom `unitree_g1_v2` config
 - Focuses on upper body and hand actions
-- Generates handwave-specific artifacts
+- Includes custom dataset (`g1_wave/`) with example data
+- Demonstrates custom modality configuration via `utils.py`
 
 **Usage**:
 ```bash
-cd export_examples/isaac_os_handwave_model
-python run_handwave_gr00t.py
+cd export_examples/custom_modality
+python export_handwave_gr00t.py
 ```
 
-### 2.2 Vanilla GR00T Example (`vanilla_gr00t/`)
-
-This example shows the standard GR00T model export process:
-
-**Location**: `export_examples/vanilla_gr00t/export_vanilla_gr00t.py`
-
-**Key Features**:
-- Uses base `nvidia/GR00T-N1.5-3B` model
-- Supports command-line arguments for customization
-- Exports full arm and hand control actions
-- Uses default demonstration data
-
-**Usage**:
-```bash
-cd export_examples/vanilla_gr00t
-python export_vanilla_gr00t.py --dataset_path demo_data/robot_sim.PickNPlace --model_path nvidia/GR00T-N1.5-3B --save_model_path gr00t_models
-```
+**Notes**:
+- This example uses a custom data config defined in `utils.py`
+- Dataset path is relative to script location (`g1_wave/`)
+- Validates `action.upper_body` and `action.hands` modalities
+- Outputs to `handwave_model/` directory
 
 ### 2.3 General Workflow Steps
 
-Both examples follow the same core workflow:
+Both examples follow the same core workflow implemented in `deployment_scripts/export_gr00t.py`:
 
-1. **Model and Dataset Loading**
+1. **Model and Dataset Loading** (via `get_policy_and_dataset()`)
    - Load the GR00T policy with specified embodiment configuration
    - Load demonstration dataset in LeRobot format
-   - Configure modality mappings and transforms
+   - Configure modality mappings and transforms from data config
 
-2. **Model Export**
-   - Export optimized ONNX models for each pipeline component
+2. **Model Export** (via `export_gr00t()`)
+   - Export optimized ONNX models for each pipeline component:
+     - Vision Transformer (ViT) backbone
+     - Large Language Model (LLM) backbone  
+     - Diffusion-based action head
    - Generate TorchScript models for preprocessing/postprocessing
    - Create deployment-ready model artifacts
 
-3. **Validation and Profiling**
-   - Compare original vs. exported model outputs
-   - Generate action distribution plots for verification
-   - Profile inference performance
+3. **Validation and Profiling** (via `plot_action_distribution()`)
+   - Reload policy to ensure clean state
+   - Run original PyTorch model over multiple iterations (default: 30)
+   - Run exported ONNX model via `ExportedGr00tRunner`
+   - Compare action distributions between implementations
+   - Generate comparative plots in `plots/python/` and `plots/onnx/`
 
-4. **IGG Configuration Generation**
-   - Generate Isaac Deploy configuration files
-   - Create execution graphs with timing information
+4. **IGG Configuration Generation** (via LEAPP `@annotate`)
+   - Profile exported model execution with `annotate.start()`
+   - Capture timing and execution graph
+   - Generate Isaac Deploy configuration files with `annotate.compile_graph()`
    - Export backend-specific parameters
 
 ## 3. Generated Artifacts

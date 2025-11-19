@@ -15,12 +15,12 @@ if deployment_scripts_dir not in sys.path:
     sys.path.insert(0, deployment_scripts_dir)
 
 
-def get_policy_and_dataset(dataset_path: str, model_path: str, device: str = "cuda"):
+def get_policy_and_dataset(dataset_path: str, model_path: str, embodiment_tag: str, modality_config: str, device: str = "cuda", video_backend: str = "decord"):
     # load the policy
-    data_config = DATA_CONFIG_MAP["fourier_gr1_arms_only"]
+    data_config = DATA_CONFIG_MAP[modality_config]
     modality_config = data_config.modality_config()
     modality_transform = data_config.transform()
-    EMBODIMENT_TAG = "gr1"
+    EMBODIMENT_TAG = embodiment_tag
     policy = Gr00tPolicy(
         model_path=model_path,
         embodiment_tag=EMBODIMENT_TAG,
@@ -33,7 +33,7 @@ def get_policy_and_dataset(dataset_path: str, model_path: str, device: str = "cu
     dataset = LeRobotSingleDataset(
         dataset_path=dataset_path,
         modality_configs=modality_config,
-        video_backend="decord",
+        video_backend=video_backend,
         video_backend_kwargs=None,
         transforms=None,  # We'll handle transforms separately through the policy
         embodiment_tag=EMBODIMENT_TAG,

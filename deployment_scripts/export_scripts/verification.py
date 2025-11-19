@@ -126,7 +126,10 @@ def plot_action_distribution(policy, dataset, plot_actions, output_dir="./plots"
             action = action_frame[action_name]
             if isinstance(action, torch.Tensor):
                 action = action.squeeze(0).cpu().numpy()
+            if action.ndim == 1:
+                action = np.expand_dims(action, 1)
             actions.append(action)
+
         actions = np.concatenate(actions, axis=1)
         full_actions.append(actions)
 

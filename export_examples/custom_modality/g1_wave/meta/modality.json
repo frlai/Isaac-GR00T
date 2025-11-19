@@ -1,0 +1,34 @@
+{
+    "state": {
+        "body": {
+            "start": 0,
+            "end": 29
+        },
+        "hands": {
+            "start": 29,
+            "end": 43
+        }
+    },
+    "action": {
+        "upper_body": {
+            "start": 0,
+            "end": 14,
+            "rotation_type": "axis_angle"
+        },
+        "hands": {
+            "start": 14,
+            "end": 28,
+            "rotation_type": "axis_angle"
+        }
+    },
+    "video": {
+        "rs_view": {
+            "original_key": "observation.images.ego_view"
+        }
+    },
+    "annotation": {
+        "human.task_description": {
+            "original_key": "task_index"
+        }
+    }
+}
