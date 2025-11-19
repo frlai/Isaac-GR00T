@@ -80,29 +80,29 @@ if __name__ == "__main__":
 
     policy, dataset = get_policy_and_dataset(
         args.dataset_path, args.model_path, args.embodiment_tag, args.modality_config, video_backend=args.video_backend)
-    # export_gr00t(policy, dataset, args.save_model_path)
+    export_gr00t(policy, dataset, args.save_model_path)
 
-    # # load policy again because export process may change some policy backends
-    # policy, dataset = get_policy_and_dataset(
-    #     args.dataset_path, args.model_path, args.embodiment_tag, args.modality_config, video_backend=args.video_backend)
+    # load policy again because export process may change some policy backends
+    policy, dataset = get_policy_and_dataset(
+        args.dataset_path, args.model_path, args.embodiment_tag, args.modality_config, video_backend=args.video_backend)
 
     runner = ExportedGr00tRunner(
         os.path.join(os.getcwd(), args.save_model_path))
-    # if len(args.plot_actions) != 0:
-    #     print("****VALIDATING GR00T MODEL****")
-    #     plot_action_distribution(
-    #         policy, dataset, plot_actions=args.plot_actions,
-    #         output_dir=os.path.join(
-    #             os.getcwd(), args.save_model_path, "plots", "python"),
-    #         iters=args.num_plot_steps)
+    if len(args.plot_actions) != 0:
+        print("****VALIDATING GR00T MODEL****")
+        plot_action_distribution(
+            policy, dataset, plot_actions=args.plot_actions,
+            output_dir=os.path.join(
+                os.getcwd(), args.save_model_path, "plots", "python"),
+            iters=args.num_plot_steps)
 
-    #     print("****PROFILING EXPORTED MODEL")
-    #     print("****RESULTS MAY TAKE TIME IF YOU DON'T HAVE THE GPU EXECUTION PROVIDER IN ONNXRUNTIME****")
-    #     plot_action_distribution(
-    #         runner, dataset, plot_actions=args.plot_actions,
-    #         output_dir=os.path.join(
-    #             os.getcwd(), args.save_model_path, "plots", "onnx"),
-    #         iters=args.num_plot_steps)
+        print("****PROFILING EXPORTED MODEL")
+        print("****RESULTS MAY TAKE TIME IF YOU DON'T HAVE THE GPU EXECUTION PROVIDER IN ONNXRUNTIME****")
+        plot_action_distribution(
+            runner, dataset, plot_actions=args.plot_actions,
+            output_dir=os.path.join(
+                os.getcwd(), args.save_model_path, "plots", "onnx"),
+            iters=args.num_plot_steps)
 
     annotate.start(name=args.save_model_path)
     resutls = runner.get_action(dataset[0])
