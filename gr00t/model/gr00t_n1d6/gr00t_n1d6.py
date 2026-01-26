@@ -277,11 +277,11 @@ class Gr00tN1d6ActionHead(nn.Module):
         backbone_output = self.process_backbone_output(backbone_output)
 
         # Get vision and language embeddings.
-        vl_embeds = backbone_output.backbone_features
-        embodiment_id = action_input.embodiment_id
+        vl_embeds = backbone_output['backbone_features']
+        embodiment_id = action_input['embodiment_id']
 
         # Embed state.
-        state_features = self.state_encoder(action_input.state, embodiment_id)
+        state_features = self.state_encoder(action_input['state'], embodiment_id)
 
         return BatchFeature(data={"backbone_features": vl_embeds, "state_features": state_features})
 
@@ -292,6 +292,7 @@ class Gr00tN1d6ActionHead(nn.Module):
         state_features: torch.Tensor,
         embodiment_id: torch.Tensor,
         backbone_output: BatchFeature,
+        initial_noise: torch.Tensor | None = None,
     ) -> BatchFeature:
         """
         Generate actions using the flow matching diffusion process.
@@ -301,17 +302,22 @@ class Gr00tN1d6ActionHead(nn.Module):
             state_features: [B, state_horizon, input_embedding_dim]
             embodiment_id: [B] (embodiment IDs)
             backbone_output: Output from the backbone model
+            initial_noise: Optional [B, action_horizon, action_dim] initial noise tensor.
+                If None, generates random noise internally.
         """
         vl_embeds = backbone_features
 
         # Set initial actions as the sampled noise.
         batch_size = vl_embeds.shape[0]
         device = vl_embeds.device
-        actions = torch.randn(
-            size=(batch_size, self.config.action_horizon, self.action_dim),
-            dtype=vl_embeds.dtype,
-            device=device,
-        )
+        if initial_noise is not None:
+            actions = initial_noise.to(device=device, dtype=vl_embeds.dtype)
+        else:
+            actions = torch.randn(
+                size=(batch_size, self.config.action_horizon, self.action_dim),
+                dtype=vl_embeds.dtype,
+                device=device,
+            )
 
         dt = 1.0 / self.num_inference_timesteps
 
@@ -340,8 +346,8 @@ class Gr00tN1d6ActionHead(nn.Module):
                     hidden_states=sa_embs,
                     encoder_hidden_states=vl_embeds,
                     timestep=timesteps_tensor,
-                    image_mask=backbone_output.image_mask,
-                    backbone_attention_mask=backbone_output.backbone_attention_mask,
+                    image_mask=backbone_output['image_mask'],
+                    backbone_attention_mask=backbone_output['backbone_attention_mask'],
                 )
             else:
                 model_output = self.model(
@@ -364,7 +370,12 @@ class Gr00tN1d6ActionHead(nn.Module):
         )
 
     @torch.no_grad()
-    def get_action(self, backbone_output: BatchFeature, action_input: BatchFeature) -> BatchFeature:
+    def get_action(
+        self,
+        backbone_output: BatchFeature,
+        action_input: BatchFeature,
+        initial_noise: torch.Tensor | None = None,
+    ) -> BatchFeature:
         """
         Generate actions using the flow matching diffusion process.
 
@@ -375,6 +386,8 @@ class Gr00tN1d6ActionHead(nn.Module):
             action_input: Input containing:
                 - state: [B, state_dim]
                 - embodiment_id: [B] (embodiment IDs)
+            initial_noise: Optional [B, action_horizon, action_dim] initial noise tensor.
+                If None, generates random noise internally.
 
         Returns:
             BatchFeature containing:
@@ -382,10 +395,11 @@ class Gr00tN1d6ActionHead(nn.Module):
         """
         features = self._encode_features(backbone_output, action_input)
         return self.get_action_with_features(
-            backbone_features=features.backbone_features,
-            state_features=features.state_features,
-            embodiment_id=action_input.embodiment_id,
+            backbone_features=features['backbone_features'],
+            state_features=features['state_features'],
+            embodiment_id=action_input['embodiment_id'],
             backbone_output=backbone_output,
+            initial_noise=initial_noise,
         )
 
     @property
@@ -512,16 +526,25 @@ class Gr00tN1d6(PreTrainedModel):
 
         return action_outputs
 
-    def get_action(self, inputs: dict) -> BatchFeature:
+    def get_action(
+        self, inputs: dict, initial_noise: torch.Tensor | None = None
+    ) -> BatchFeature:
         """
         Generate actions using the complete model.
+
+        Args:
+            inputs: Model inputs dict
+            initial_noise: Optional [B, action_horizon, action_dim] initial noise tensor.
+                If None, generates random noise internally.
         """
         # Prepare inputs for backbone and action head
         backbone_inputs, action_inputs = self.prepare_input(inputs)
 
         # Forward through backbone
         backbone_outputs = self.backbone(backbone_inputs)
-        action_outputs = self.action_head.get_action(backbone_outputs, action_inputs)
+        action_outputs = self.action_head.get_action(
+            backbone_outputs, action_inputs, initial_noise=initial_noise
+        )
 
         return action_outputs
 
