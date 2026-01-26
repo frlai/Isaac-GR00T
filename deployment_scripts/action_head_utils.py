@@ -67,6 +67,7 @@ def action_head_pytorch_forward(self, backbone_output, action_input):
             encoder_hidden_states=vl_embs,
             timestep=timesteps_tensor,
         )
+        
         pred = self.action_decoder(model_output, embodiment_id)
 
         pred_velocity = pred[:, -self.action_horizon :]
