@@ -78,7 +78,7 @@ uv run python export/export_with_leapp.py \
 Validates the exported model by running both the original and exported policies on the same dataset, then comparing their outputs across all joints.
 
 ```bash
-uv run python export/policy_comparison.py
+uv run python export/policy_comparison.py 
 ```
 
 **Parameters:**

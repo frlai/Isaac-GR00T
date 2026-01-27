@@ -17,6 +17,38 @@ from gr00t.policy.gr00t_policy import _rec_to_dtype
 from gr00t.data.types import MessageType
 
 
+def _backbone_forward_with_int8(self, vl_input):
+    """
+    Backbone forward that converts boolean outputs to int8 for TensorRT compatibility.
+    Calls self._original_forward which is the original forward method.
+    """
+    outputs = self._original_forward(vl_input)
+    # Convert boolean tensors to int8
+    converted_outputs = {}
+    for key, value in outputs.items():
+        if torch.is_tensor(value) and value.dtype == torch.bool:
+            converted_outputs[key] = value.to(torch.int8)
+        else:
+            converted_outputs[key] = value
+    return converted_outputs
+
+
+def _action_head_get_action_with_bool(self, backbone_outputs, action_inputs, initial_noise=None):
+    """
+    Action head get_action that converts int8 mask inputs back to bool.
+    Calls self._original_get_action which is the original get_action method.
+    """
+    # Convert int8 tensors to bool inline (no external function calls for leapp compatibility)
+    converted_backbone_outputs = {}
+    for k, v in backbone_outputs.items():
+        if torch.is_tensor(v) and v.dtype == torch.int8:
+            converted_backbone_outputs[k] = v.to(torch.bool)
+        else:
+            converted_backbone_outputs[k] = v
+    
+    return self._original_get_action(converted_backbone_outputs, action_inputs, initial_noise=initial_noise)
+
+
 def get_action_traceable(self, data, initial_noise=None):
     """
     Torch-traceable version of get_action for export.
@@ -168,9 +200,17 @@ def make_modifications(policy):
     
     # Disable gradients for export
     policy.model.backbone.requires_grad_(False)
+
+    # Store original forward and replace with int8 conversion wrapper
+    policy.model.backbone._original_forward = policy.model.backbone.forward
+    policy.model.backbone.forward = types.MethodType(_backbone_forward_with_int8, policy.model.backbone)
     
     # ==================== Action head modifications ====================
     policy.model.action_head = policy.model.action_head.float()
+
+    # Store original get_action and replace with bool conversion wrapper
+    policy.model.action_head._original_get_action = policy.model.action_head.get_action
+    policy.model.action_head.get_action = types.MethodType(_action_head_get_action_with_bool, policy.model.action_head)
 
     # ==================== Preprocessing modifications ====================
     # Replace state/action processor with torch-traceable version
