@@ -17,17 +17,21 @@ from gr00t.policy.gr00t_policy import _rec_to_dtype
 from gr00t.data.types import MessageType
 
 
-def _backbone_forward_with_int8(self, vl_input):
+def _backbone_forward_with_int32(self, vl_input):
     """
-    Backbone forward that converts boolean outputs to int8 for TensorRT compatibility.
+    Backbone forward that converts boolean outputs to int32 for TensorRT compatibility.
+    
+    Note: TensorRT doesn't support int8 as a general data type (only for INT8 quantization),
+    so we use int32 instead which has full TensorRT support.
+    
     Calls self._original_forward which is the original forward method.
     """
     outputs = self._original_forward(vl_input)
-    # Convert boolean tensors to int8
+    # Convert boolean tensors to int32
     converted_outputs = {}
     for key, value in outputs.items():
         if torch.is_tensor(value) and value.dtype == torch.bool:
-            converted_outputs[key] = value.to(torch.int8)
+            converted_outputs[key] = value.to(torch.int32)
         else:
             converted_outputs[key] = value
     return converted_outputs
@@ -35,13 +39,13 @@ def _backbone_forward_with_int8(self, vl_input):
 
 def _action_head_get_action_with_bool(self, backbone_outputs, action_inputs, initial_noise=None):
     """
-    Action head get_action that converts int8 mask inputs back to bool.
+    Action head get_action that converts int32 mask inputs back to bool.
     Calls self._original_get_action which is the original get_action method.
     """
-    # Convert int8 tensors to bool inline (no external function calls for leapp compatibility)
+    # Convert int32 tensors to bool inline (no external function calls for leapp compatibility)
     converted_backbone_outputs = {}
     for k, v in backbone_outputs.items():
-        if torch.is_tensor(v) and v.dtype == torch.int8:
+        if torch.is_tensor(v) and v.dtype == torch.int32:
             converted_backbone_outputs[k] = v.to(torch.bool)
         else:
             converted_backbone_outputs[k] = v
@@ -118,11 +122,12 @@ def get_action_traceable(self, data, initial_noise=None):
         static_outputs=static_outputs,
         export_with='onnx'
     )
+
     annotate.output_tensors(
         'preprocess_state',
         {'state': collated_inputs['inputs']['state'],
         'reference': states},
-        export_with='onnx', backend_params={'dynamo': False}
+        export_with='onnx-torchscript'
     )
 
     # Step 4: Run model inference to predict actions
@@ -201,9 +206,9 @@ def make_modifications(policy):
     # Disable gradients for export
     policy.model.backbone.requires_grad_(False)
 
-    # Store original forward and replace with int8 conversion wrapper
+    # Store original forward and replace with int32 conversion wrapper
     policy.model.backbone._original_forward = policy.model.backbone.forward
-    policy.model.backbone.forward = types.MethodType(_backbone_forward_with_int8, policy.model.backbone)
+    policy.model.backbone.forward = types.MethodType(_backbone_forward_with_int32, policy.model.backbone)
     
     # ==================== Action head modifications ====================
     policy.model.action_head = policy.model.action_head.float()

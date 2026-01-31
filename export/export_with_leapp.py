@@ -37,8 +37,7 @@ def export_gr00t_with_leapp(policy, data, output_name='exported_gr00t'):
     # Configure backbone export
     policy.model.backbone.forward = annotate.method(
         node_name='backbone',
-        export_with='onnx',
-        backend_params={'dynamo': False}
+        export_with='onnx-torchscript',
     )(policy.model.backbone.forward)
 
     # Configure action head export
@@ -48,7 +47,7 @@ def export_gr00t_with_leapp(policy, data, output_name='exported_gr00t'):
     )(policy.model.action_head.get_action)
 
     # Run tracing
-    annotate.start(output_name)
+    annotate.start(output_name, patch_numpy=False)
     get_action_traceable(policy, data)
     annotate.stop()
     
