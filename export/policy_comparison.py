@@ -88,7 +88,7 @@ def collect_exported_policy_outputs(exported_policy, dataset, modality_config,
         episode_data: Episode data from dataset
         modality_config: Modality configuration
         embodiment_tag: Embodiment tag
-        joint_names: List of joint names to collect
+        joint_names: List of action output joint names to collect
         video_key: Key for video input (e.g., 'ego_view_bg_crop_pad_res256_freq20')
         max_steps: Number of steps to process
         
@@ -105,13 +105,16 @@ def collect_exported_policy_outputs(exported_policy, dataset, modality_config,
         )
         
         # Build inputs dict for exported policy
-        # Map joint names to leapp input format: preprocess_state/<joint_name>
+        # Use actual state keys from step_data.states (different from action output keys)
+        # State inputs: left_leg, right_leg, waist, left_arm, right_arm, left_hand, right_hand
+        # Action outputs: left_arm, right_arm, left_hand, right_hand, waist, base_height_command, navigate_command
         inputs = {}
-        for joint_name in joint_names:
-            state_key = f"preprocess_state/{joint_name}"
+        state_keys = list(step_data.states.keys())
+        for state_name in state_keys:
+            input_key = f"preprocess_state/{state_name}"
             # States are numpy arrays, convert to tensor
-            state_data = step_data.states[joint_name]
-            inputs[state_key] = torch.from_numpy(state_data).float()
+            state_data = step_data.states[state_name]
+            inputs[input_key] = torch.from_numpy(state_data).float()
         
         # Add video input
         # Stack images and convert to tensor - keep as uint8 (model expects raw image data)

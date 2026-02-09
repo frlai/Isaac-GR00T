@@ -144,44 +144,44 @@ class StateActionProcessorTorch:
                             f"State dict required for relative->absolute conversion of key '{key}' "
                             f"in embodiment '{embodiment_tag}'"
                         )
-                # Determine which state key to use as reference
-                state_key = action_config.state_key if action_config.state_key else key
-                if state_key not in state:
-                    raise KeyError(
-                        f"Reference state key '{state_key}' not found in state dict "
-                        f"for embodiment '{embodiment_tag}'"
-                    )
+                    # Determine which state key to use as reference
+                    state_key = action_config.state_key if action_config.state_key else key
+                    if state_key not in state:
+                        raise KeyError(
+                            f"Reference state key '{state_key}' not found in state dict "
+                            f"for embodiment '{embodiment_tag}'"
+                        )
 
-                relative_action = unnormalized_values[key]
+                    relative_action = unnormalized_values[key]
 
-                # Handle batched and unbatched cases
-                is_batched = relative_action.ndim == 3
-                if not is_batched:
-                    assert relative_action.ndim == 2
-                    reference_state = state[state_key]
-                    if reference_state.ndim == 2:
-                        reference_state = reference_state.unsqueeze(0)
-                    relative_action = relative_action.unsqueeze(0)
-                else:
-                    reference_state = state[state_key]
-                    if reference_state.ndim == 2:
-                        reference_state = reference_state.unsqueeze(0)
+                    # Handle batched and unbatched cases
+                    is_batched = relative_action.ndim == 3
+                    if not is_batched:
+                        assert relative_action.ndim == 2
+                        reference_state = state[state_key]
+                        if reference_state.ndim == 2:
+                            reference_state = reference_state.unsqueeze(0)
+                        relative_action = relative_action.unsqueeze(0)
+                    else:
+                        reference_state = state[state_key]
+                        if reference_state.ndim == 2:
+                            reference_state = reference_state.unsqueeze(0)
 
-                # Convert batched relative actions to absolute
-                absolute_actions = []
-                for s, a in zip(reference_state, relative_action):
-                    # Use last timestep of state as reference
-                    absolute_action = self._convert_to_absolute_action(
-                        action=a,
-                        reference_state=s[-1],
-                        action_type=action_config.type,
-                    )
-                    absolute_actions.append(absolute_action)
+                    # Convert batched relative actions to absolute
+                    absolute_actions = []
+                    for s, a in zip(reference_state, relative_action):
+                        # Use last timestep of state as reference
+                        absolute_action = self._convert_to_absolute_action(
+                            action=a,
+                            reference_state=s[-1],
+                            action_type=action_config.type,
+                        )
+                        absolute_actions.append(absolute_action)
 
-                if is_batched:
-                    unnormalized_values[key] = torch.stack(absolute_actions, dim=0)
-                else:
-                    unnormalized_values[key] = absolute_actions[0]
+                    if is_batched:
+                        unnormalized_values[key] = torch.stack(absolute_actions, dim=0)
+                    else:
+                        unnormalized_values[key] = absolute_actions[0]
 
         return unnormalized_values
 
