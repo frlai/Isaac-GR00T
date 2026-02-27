@@ -16,6 +16,11 @@ from data.collator_torch import create_torch_collator
 from gr00t.policy.gr00t_policy import _rec_to_dtype
 from gr00t.data.types import MessageType
 
+from leapp import annotate
+from leapp import TensorSemantics
+from leapp import inputKindEnum, outputKindEnum
+from joint_name_parser import get_joint_names
+
 
 def _backbone_forward_with_int32(self, vl_input):
     """
@@ -65,7 +70,6 @@ def get_action_traceable(self, data, initial_noise=None):
         initial_noise: Optional initial noise tensor for diffusion.
             Shape: [B, action_horizon, action_dim]. If None, noise is generated internally.
     """
-    from leapp import annotate
     
     # Step 1: Split batched observation into individual observations
     unbatched_observations = self._unbatch_observation(data)
@@ -81,12 +85,18 @@ def get_action_traceable(self, data, initial_noise=None):
     # Annotate inputs for export tracing
     for i in range(len(unbatched_observations)):
         for k, v in unbatched_observations[i]["state"].items():
+            # v = TensorSemantics(v, )
+            element_names = get_joint_names(self.embodiment_tag, "state", k)
             unbatched_observations[i]["state"][k] = annotate.input_tensors(
-                {k: v}, node_name='preprocess_state'
+                'preprocess_state', TensorSemantics(name=k, ref = v, 
+                                                    kind = inputKindEnum.JOINT_POSITION, 
+                                                    element_names = element_names)
             )
         for k, v in unbatched_observations[i]["video"].items():
+
             unbatched_observations[i]["video"][k] = annotate.input_tensors(
-                {k: v}, node_name='preprocess_video'
+                'preprocess_video', TensorSemantics(name=k, ref = v, 
+                                                    kind = "state/video")
             )
 
     # Step 2: Process each observation through the VLA processor
@@ -148,9 +158,8 @@ def get_action_traceable(self, data, initial_noise=None):
         model_pred = self.model.get_action(**collated_inputs, initial_noise=initial_noise)
     normalized_action = model_pred["action_pred"].float()
 
-    normalized_action, states = annotate.input_tensors(
+    normalized_action, states = annotate.input_tensors('decode_action', 
         {'normalized_action': normalized_action, 'state': states},
-        node_name='decode_action'
     )
 
     # Step 5: Decode actions from normalized space back to physical units
@@ -164,11 +173,14 @@ def get_action_traceable(self, data, initial_noise=None):
         normalized_action, self.embodiment_tag, batched_states
     )
 
-    # Cast all actions to float32 for consistency
-    casted_action = {
-        key: value.to(torch.float32) for key, value in unnormalized_action.items()
-    }
-    annotate.output_tensors('decode_action', casted_action, export_with='onnx')
+    # # Cast all actions to float32 for consistency
+    casted_action = [TensorSemantics(name=key, ref = value.to(torch.float32),
+                    kind = outputKindEnum.JOINT_POSITION,
+                    element_names = get_joint_names(self.embodiment_tag, "action", key)) for key, value in unnormalized_action.items()]
+    
+
+    annotate.output_tensors('decode_action', casted_action, 
+                            export_with='onnx')
 
     return casted_action, {}
 

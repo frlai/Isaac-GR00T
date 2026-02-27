@@ -47,7 +47,7 @@ def export_gr00t_with_leapp(policy, data, output_name='exported_gr00t'):
     )(policy.model.action_head.get_action)
 
     # Run tracing
-    annotate.start(output_name, patch_numpy=False)
+    annotate.start(output_name, patch_numpy=False, dry_run=False)
     get_action_traceable(policy, data)
     annotate.stop()
     
