@@ -18,7 +18,7 @@ from gr00t.data.types import MessageType
 
 from leapp import annotate
 from leapp import TensorSemantics
-from leapp import inputKindEnum, outputKindEnum
+from leapp import InputKindEnum, OutputKindEnum
 from joint_name_parser import get_joint_names
 
 
@@ -89,7 +89,7 @@ def get_action_traceable(self, data, initial_noise=None):
             element_names = get_joint_names(self.embodiment_tag, "state", k)
             unbatched_observations[i]["state"][k] = annotate.input_tensors(
                 'preprocess_state', TensorSemantics(name=k, ref = v, 
-                                                    kind = inputKindEnum.JOINT_POSITION, 
+                                                    kind = InputKindEnum.JOINT_POSITION, 
                                                     element_names = element_names)
             )
         for k, v in unbatched_observations[i]["video"].items():
@@ -175,7 +175,7 @@ def get_action_traceable(self, data, initial_noise=None):
 
     # # Cast all actions to float32 for consistency
     casted_action = [TensorSemantics(name=key, ref = value.to(torch.float32),
-                    kind = outputKindEnum.JOINT_POSITION,
+                    kind = OutputKindEnum.JOINT_POSITION,
                     element_names = get_joint_names(self.embodiment_tag, "action", key)) for key, value in unnormalized_action.items()]
     
 

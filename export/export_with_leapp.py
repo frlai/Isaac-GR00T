@@ -9,6 +9,7 @@ from utils import get_policy_and_dataset, get_gr00t_input
 from policy_modifications import make_modifications, get_action_traceable
 import os
 import gr00t
+import leapp
 from leapp import annotate
 
 import argparse
@@ -35,24 +36,24 @@ def export_gr00t_with_leapp(policy, data, output_name='exported_gr00t'):
     policy = make_modifications(policy)
 
     # Configure backbone export
-    policy.model.backbone.forward = annotate.method(
+    policy.model.backbone.forward = annotate._method(
         node_name='backbone',
         export_with='onnx-torchscript',
     )(policy.model.backbone.forward)
 
     # Configure action head export
-    policy.model.action_head.get_action = annotate.method(
+    policy.model.action_head.get_action = annotate._method(
         node_name='action_head',
         export_with='onnx',
     )(policy.model.action_head.get_action)
 
     # Run tracing
-    annotate.start(output_name, patch_numpy=False, dry_run=False)
+    leapp.start(output_name, global_patching=False, dry_run=False)
     get_action_traceable(policy, data)
-    annotate.stop()
+    leapp.stop()
     
     # Compile and export
-    annotate.compile_graph(validate=False) # validate with comparison script
+    leapp.compile_graph(validate=False) # validate with comparison script
     
     print(f"Export completed: {output_name}")
 

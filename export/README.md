@@ -41,7 +41,7 @@ uv run python scripts/deployment/standalone_inference_script.py \
 ### 4. Install leapp
 
 ```bash
-uv pip install dist/leapp-0.3.0-py3-none-any.whl
+uv pip install dist/leapp-0.4.0-py3-none-any.whl
 ```
 
 ## Usage
@@ -73,6 +73,18 @@ uv run python export/export_with_leapp.py \
   --output_name exported_gr00t
 ```
 
+### For Apple to Plate Task
+
+You will need to provide your own dataset. The official apple to plate dataset can be found [here](https://huggingface.co/datasets/nvidia/PhysicalAI-Robotics-GR00T-X-Embodiment-Sim). There is no need to download the model as it is stored in hugging face. Gr00t will automatically pull the model.
+
+Once downloaded you can run the export using:
+
+```bash
+uv run python export/export_with_leapp.py --model_path nvidia/GR00T-N1.6-G1-PnPAppleToPlate --embodiment_tag unitree_g1 --dataset_path <path to downloaded dataset>
+```
+
+
+
 ### Validate Export
 
 Validates the exported model by running both the original and exported policies on the same dataset, then comparing their outputs across all joints.
@@ -103,6 +115,11 @@ uv run python export/policy_comparison.py \
   --show_plots True
 ```
 
+similarly you can run the comparison if you exported the apples to plate task, you would need to provide the correct dataset and model path.
+
+```bash
+uv run python export/policy_comparison.py  --model_path nvidia/GR00T-N1.6-G1-PnPAppleToPlate     --embodiment_tag unitree_g1     --dataset_path <path to dataset>
+```
 
 **What it does:**
 1. Runs the original PyTorch policy and exported ONNX policy on identical inputs
