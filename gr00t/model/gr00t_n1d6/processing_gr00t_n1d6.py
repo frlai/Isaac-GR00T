@@ -342,8 +342,15 @@ class Gr00tN1d6Processor(BaseProcessor):
 
         # Concatenate states
         state_keys = self.modality_configs[embodiment_tag.value]["state"].modality_keys
+        normalized_states_torch = []
+        for key in state_keys:
+            if type(normalized_states[key]) == np.ndarray:
+                normalized_states_torch.append(torch.from_numpy(normalized_states[key]))
+            else:
+                normalized_states_torch.append(normalized_states[key])
+        
         normalized_states = torch.cat(
-            [torch.from_numpy(normalized_states[key]) for key in state_keys], dim=-1
+            normalized_states_torch, dim=-1
         )
         normalized_states = torch.cat(
             [
