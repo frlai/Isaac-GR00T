@@ -369,7 +369,10 @@ class Gr00tPolicy(BasePolicy):
                 )
 
     def _get_action(
-        self, observation: dict[str, Any], options: dict[str, Any] | None = None
+        self,
+        observation: dict[str, Any],
+        options: dict[str, Any] | None = None,
+        initial_noise: torch.Tensor | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Internal method to compute actions from observations.
 
@@ -383,6 +386,8 @@ class Gr00tPolicy(BasePolicy):
         Args:
             observation: Batched observation dictionary
             options: Optional parameters (currently unused)
+            initial_noise: Optional initial noise tensor for diffusion.
+                Shape: [B, action_horizon, action_dim]. If None, noise is generated internally.
 
         Returns:
             Tuple of (actions_dict, info_dict)
@@ -405,7 +410,7 @@ class Gr00tPolicy(BasePolicy):
 
         # Step 4: Run model inference to predict actions
         with torch.inference_mode():
-            model_pred = self.model.get_action(**collated_inputs)
+            model_pred = self.model.get_action(**collated_inputs, initial_noise=initial_noise)
         normalized_action = model_pred["action_pred"].float()
 
         # Step 5: Decode actions from normalized space back to physical units
@@ -625,7 +630,10 @@ class Gr00tSimPolicyWrapper(PolicyWrapper):
             )
 
     def _get_action(
-        self, observation: dict[str, Any], options: dict[str, Any] | None = None
+        self,
+        observation: dict[str, Any],
+        options: dict[str, Any] | None = None,
+        initial_noise: torch.Tensor | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Transform Gr00t sim observation format and compute actions.
 
@@ -643,6 +651,8 @@ class Gr00tSimPolicyWrapper(PolicyWrapper):
         Args:
             observation: Flat observation dictionary from Gr00t sim environment
             options: Optional parameters (currently unused)
+            initial_noise: Optional initial noise tensor for diffusion.
+                Shape: [B, action_horizon, action_dim]. If None, noise is generated internally.
 
         Returns:
             Tuple of (flat_actions_dict, info_dict)
@@ -675,7 +685,7 @@ class Gr00tSimPolicyWrapper(PolicyWrapper):
                     new_obs[modality][key] = arr
 
         # Compute actions using the underlying Gr00tPolicy
-        action, info = self.policy.get_action(new_obs, options)
+        action, info = self.policy.get_action(new_obs, options, initial_noise=initial_noise)
 
         # Transform actions back to flat format for Gr00t sim environment
         # action['joints'] -> 'action.joints'

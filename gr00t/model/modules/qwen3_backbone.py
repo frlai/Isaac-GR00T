@@ -144,10 +144,8 @@ class Qwen3Backbone(torch.nn.Module):
         outputs = outputs.hidden_states[-1]
         image_mask = vl_input["input_ids"] == self.model.config.image_token_id
         attention_mask = vl_input["attention_mask"] == 1
-        return BatchFeature(
-            data={
+        return {
                 "backbone_features": outputs,
                 "backbone_attention_mask": attention_mask,
                 "image_mask": image_mask,
             }
-        )  # [B, T2, hidden_size]

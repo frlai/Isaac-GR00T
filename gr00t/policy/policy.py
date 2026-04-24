@@ -16,6 +16,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+import torch
+
 
 class BasePolicy(ABC):
     """Abstract base class for robotic control policies.
@@ -59,7 +61,10 @@ class BasePolicy(ABC):
 
     @abstractmethod
     def _get_action(
-        self, observation: dict[str, Any], options: dict[str, Any] | None = None
+        self,
+        observation: dict[str, Any],
+        options: dict[str, Any] | None = None,
+        initial_noise: torch.Tensor | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Compute and return the next action based on current observation.
 
@@ -69,6 +74,8 @@ class BasePolicy(ABC):
         Args:
             observation: Dictionary containing the current state/observation
             options: Optional configuration dict for action computation
+            initial_noise: Optional initial noise tensor for diffusion models.
+                Shape: [B, action_horizon, action_dim]. If None, noise is generated internally.
 
         Returns:
             Tuple of (action, info):
@@ -78,7 +85,10 @@ class BasePolicy(ABC):
         pass
 
     def get_action(
-        self, observation: dict[str, Any], options: dict[str, Any] | None = None
+        self,
+        observation: dict[str, Any],
+        options: dict[str, Any] | None = None,
+        initial_noise: torch.Tensor | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Compute and return the next action based on current observation with validation.
 
@@ -88,6 +98,8 @@ class BasePolicy(ABC):
         Args:
             observation: Dictionary containing the current state/observation
             options: Optional configuration dict for action computation
+            initial_noise: Optional initial noise tensor for diffusion models.
+                Shape: [B, action_horizon, action_dim]. If None, noise is generated internally.
 
         Returns:
             Tuple of (action, info):
@@ -99,7 +111,7 @@ class BasePolicy(ABC):
         """
         if self.strict:
             self.check_observation(observation)
-        action, info = self._get_action(observation, options)
+        action, info = self._get_action(observation, options, initial_noise=initial_noise)
         if self.strict:
             self.check_action(action)
         return action, info
