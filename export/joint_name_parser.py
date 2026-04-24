@@ -375,7 +375,6 @@ EMBODIMENT_JOINT_REGISTRY: Dict[str, Dict[str, Dict[str, List[str]]]] = {
     },
 }
 
-
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -471,14 +470,75 @@ def get_joint_names(
     
     if group_name is None:
         return modality_joints
-    
+
     if group_name not in modality_joints:
+        # Fallback: effort_<x> keys (feed-forward torques) map to the same joints
+        # as their position counterpart <x>. Lets users add effort outputs to their
+        # modality config without duplicating joint-name registrations.
+        if group_name.startswith("effort_"):
+            base_key = group_name[len("effort_"):]
+            if base_key in modality_joints:
+                return modality_joints[base_key]
+
         raise ValueError(
             f"Group '{group_name}' not found in {embodiment_tag}/{modality_type}. "
             f"Available: {list(modality_joints.keys())}"
         )
-    
+
     return modality_joints[group_name]
+
+
+def register_embodiment_joints(
+    embodiment_tag: Union[str, EmbodimentTag],
+    joints: Dict[str, Dict[str, List[str]]],
+    base_embodiment: Optional[Union[str, EmbodimentTag]] = None,
+) -> None:
+    """Register a new embodiment in the joint registry.
+
+    This is the programmatic equivalent of ``register_modality_config`` in GR00T.
+    Use it to support fine-tunes with ``EmbodimentTag.NEW_EMBODIMENT`` or custom
+    embodiments not in the pre-registered registry.
+
+    Args:
+        embodiment_tag: The embodiment identifier to register.
+        joints: Mapping of ``modality_type`` ("state"/"action") to a mapping of
+            ``group_name`` to a list of joint names.  Only keys you supply are
+            stored; merging with a base embodiment is controlled via
+            ``base_embodiment``.
+        base_embodiment: Optional embodiment to copy joints from before applying
+            overrides.  Useful when a custom embodiment is a variant of an
+            existing one (e.g. a different whole-body controller on the same
+            robot).
+
+    Example::
+
+        register_embodiment_joints(
+            EmbodimentTag.NEW_EMBODIMENT,
+            joints={},  # use everything from unitree_g1
+            base_embodiment="unitree_g1",
+        )
+    """
+    import copy as _copy
+
+    if isinstance(embodiment_tag, EmbodimentTag):
+        embodiment_tag = embodiment_tag.value
+
+    if base_embodiment is not None:
+        if isinstance(base_embodiment, EmbodimentTag):
+            base_embodiment = base_embodiment.value
+        if base_embodiment not in EMBODIMENT_JOINT_REGISTRY:
+            raise ValueError(
+                f"Base embodiment '{base_embodiment}' not in registry. "
+                f"Available: {list(EMBODIMENT_JOINT_REGISTRY.keys())}"
+            )
+        merged = _copy.deepcopy(EMBODIMENT_JOINT_REGISTRY[base_embodiment])
+    else:
+        merged = {}
+
+    for modality_type, groups in joints.items():
+        merged.setdefault(modality_type, {}).update(groups)
+
+    EMBODIMENT_JOINT_REGISTRY[embodiment_tag] = merged
 
 
 def get_flat_joint_names(

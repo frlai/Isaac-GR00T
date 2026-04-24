@@ -95,8 +95,8 @@ def get_action_traceable(self, data, initial_noise=None):
         for k, v in unbatched_observations[i]["video"].items():
 
             unbatched_observations[i]["video"][k] = annotate.input_tensors(
-                'preprocess_video', TensorSemantics(name=k, ref = v, 
-                                                    kind = "state/video")
+                'preprocess_video', TensorSemantics(name=k, ref = v,
+                                                    kind = "state/camera/image")
             )
 
     # Step 2: Process each observation through the VLA processor
@@ -173,13 +173,32 @@ def get_action_traceable(self, data, initial_noise=None):
         normalized_action, self.embodiment_tag, batched_states
     )
 
-    # # Cast all actions to float32 for consistency
-    casted_action = [TensorSemantics(name=key, ref = value.to(torch.float32),
-                    kind = OutputKindEnum.JOINT_POSITION,
-                    element_names = get_joint_names(self.embodiment_tag, "action", key)) for key, value in unnormalized_action.items()]
-    
+    # Cast all actions to float32 for consistency.  Pick the right `kind` per output:
+    #   - effort_* keys     -> target/joint/effort
+    #   - navigate_command  -> velocity_command (downstream convention)
+    #   - base_height_command -> no kind (scalar standing-height target)
+    #   - everything else   -> target/joint/position (arms/hands/waist)
+    def _kind_for(output_key: str):
+        if output_key.startswith("effort_"):
+            return OutputKindEnum.JOINT_EFFORT
+        if output_key == "navigate_command":
+            return "velocity_command"
+        if output_key == "base_height_command":
+            return None
+        return OutputKindEnum.JOINT_POSITION
 
-    annotate.output_tensors('decode_action', casted_action, 
+    casted_action = [
+        TensorSemantics(
+            name=key,
+            ref=value.to(torch.float32),
+            kind=_kind_for(key),
+            element_names=get_joint_names(self.embodiment_tag, "action", key),
+        )
+        for key, value in unnormalized_action.items()
+    ]
+
+
+    annotate.output_tensors('decode_action', casted_action,
                             export_with='onnx')
 
     return casted_action, {}
