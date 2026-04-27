@@ -25,27 +25,42 @@ from joint_name_parser import get_joint_names
 def _backbone_forward_with_int32(self, vl_input):
     """
     Backbone forward that converts boolean outputs to int32 for TensorRT compatibility.
-    
+
     Note: TensorRT doesn't support int8 as a general data type (only for INT8 quantization),
     so we use int32 instead which has full TensorRT support.
-    
+
     Calls self._original_forward which is the original forward method.
+
+    The local variable holding the result is named ``backbone_outputs`` so that
+    leapp's auto-generated tensor names (which include the local variable name)
+    already match the parameter name (``backbone_outputs``) of the downstream
+    ``action_head.get_action`` consumer.  Without this alignment, leapp's
+    cross-node name reconciler rewrites the names *only* in the yaml metadata
+    after the ONNX file has been exported, producing yaml output that disagrees
+    with the actual ONNX graph.
     """
     outputs = self._original_forward(vl_input)
     # Convert boolean tensors to int32
-    converted_outputs = {}
+    backbone_outputs = {}
     for key, value in outputs.items():
         if torch.is_tensor(value) and value.dtype == torch.bool:
-            converted_outputs[key] = value.to(torch.int32)
+            backbone_outputs[key] = value.to(torch.int32)
         else:
-            converted_outputs[key] = value
-    return converted_outputs
+            backbone_outputs[key] = value
+    return backbone_outputs
 
 
 def _action_head_get_action_with_bool(self, backbone_outputs, action_inputs, initial_noise=None):
     """
     Action head get_action that converts int32 mask inputs back to bool.
     Calls self._original_get_action which is the original get_action method.
+
+    The returned dict's ``action_pred`` key is renamed to ``normalized_action``
+    so the leapp-generated ONNX output name (``normalized_action``) already
+    matches the parameter name that the downstream ``decode_action`` node uses
+    to consume this tensor.  Without this rename, leapp's reconciler renames
+    the action_head output to ``normalized_action`` only in the yaml metadata
+    and the actual ONNX file keeps the original ``output1_action_pred`` name.
     """
     # Convert int32 tensors to bool inline (no external function calls for leapp compatibility)
     converted_backbone_outputs = {}
@@ -54,8 +69,20 @@ def _action_head_get_action_with_bool(self, backbone_outputs, action_inputs, ini
             converted_backbone_outputs[k] = v.to(torch.bool)
         else:
             converted_backbone_outputs[k] = v
-    
-    return self._original_get_action(converted_backbone_outputs, action_inputs, initial_noise=initial_noise)
+
+    # Call the original method.  We rename ``action_pred`` -> ``normalized_action``
+    # in the returned dict so that producer/consumer names align across the leapp
+    # graph (the downstream ``decode_action`` consumes this tensor under the
+    # name ``normalized_action``).  The rename is inlined and produces a fresh
+    # dict literal because leapp uses local-variable names as a tensor-name
+    # prefix; using a named intermediate variable would leak that name into the
+    # exported ONNX output names.
+    return {
+        ("normalized_action" if k == "action_pred" else k): v
+        for k, v in self._original_get_action(
+            converted_backbone_outputs, action_inputs, initial_noise=initial_noise
+        ).items()
+    }
 
 
 def get_action_traceable(self, data, initial_noise=None):
@@ -119,24 +146,49 @@ def get_action_traceable(self, data, initial_noise=None):
     collated_inputs = self.collate_fn(processed_inputs)
     collated_inputs = _rec_to_dtype(collated_inputs, dtype=torch.float32)
     
-    # Annotate outputs for export
-    static_outputs = {
-        'input_ids': collated_inputs['inputs']['input_ids'],
-        'attention_mask': collated_inputs['inputs']['attention_mask'],
-        'image_sizes': collated_inputs['inputs']['image_sizes'],
-        'embodiment_id': collated_inputs['inputs']['embodiment_id']
-    }
+    # Annotate outputs for export.
+    #
+    # The output dicts below mirror the parameter-name structure that downstream
+    # consumers (backbone, action_head, decode_action) use for these tensors.
+    # leapp names tensors by walking the dict keys (parent_key + "_" + child_key
+    # via flatten_io_structure), so producing pre-flattened names like
+    # ``vl_input_pixel_values`` here makes the producer's output names already
+    # equal to the consumer's input names.  When that alignment holds, leapp's
+    # cross-node name reconciler is a no-op and the yaml metadata stays
+    # consistent with the actual ONNX graph.
     annotate.output_tensors(
         'preprocess_video',
-        {'pixel_values': collated_inputs['inputs']['pixel_values']},
-        static_outputs=static_outputs,
+        # The non-static "live" tensor that the ONNX graph computes.
+        # backbone consumes this as ``vl_input.pixel_values`` and action_head
+        # consumes it as ``vl_input.pixel_values`` as well, so we name it
+        # ``vl_input.pixel_values`` here too.
+        {'vl_input': {'pixel_values': collated_inputs['inputs']['pixel_values']}},
+        # Static outputs (constants baked into the graph) -- backbone reads
+        # ``vl_input.{input_ids,attention_mask}`` and action_head reads
+        # ``action_inputs.{image_sizes,embodiment_id}`` plus
+        # ``vl_input.{input_ids,attention_mask}``.  Mirror that structure.
+        static_outputs={
+            'vl_input': {
+                'input_ids': collated_inputs['inputs']['input_ids'],
+                'attention_mask': collated_inputs['inputs']['attention_mask'],
+            },
+            'action_inputs': {
+                'image_sizes': collated_inputs['inputs']['image_sizes'],
+                'embodiment_id': collated_inputs['inputs']['embodiment_id'],
+            },
+        },
         export_with='onnx'
     )
 
+    # preprocess_state outputs feed both action_head (via ``action_inputs.state``)
+    # and decode_action (via ``state[i]`` -- a list of dicts the consumer
+    # named ``state``, hence the rename of ``reference`` -> ``state`` below).
     annotate.output_tensors(
         'preprocess_state',
-        {'state': collated_inputs['inputs']['state'],
-        'reference': states},
+        {
+            'action_inputs': {'state': collated_inputs['inputs']['state']},
+            'state': states,
+        },
         export_with='onnx-torchscript'
     )
 
@@ -156,7 +208,10 @@ def get_action_traceable(self, data, initial_noise=None):
     
     with torch.inference_mode():
         model_pred = self.model.get_action(**collated_inputs, initial_noise=initial_noise)
-    normalized_action = model_pred["action_pred"].float()
+    # ``_action_head_get_action_with_bool`` renamed action_pred -> normalized_action
+    # so producer/consumer names align across the leapp graph.  See the wrapper
+    # docstring above for the rationale.
+    normalized_action = model_pred["normalized_action"].float()
 
     normalized_action, states = annotate.input_tensors('decode_action', 
         {'normalized_action': normalized_action, 'state': states},
