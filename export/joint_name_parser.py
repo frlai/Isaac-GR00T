@@ -495,9 +495,9 @@ def register_embodiment_joints(
 ) -> None:
     """Register a new embodiment in the joint registry.
 
-    This is the programmatic equivalent of ``register_modality_config`` in GR00T.
-    Use it to support fine-tunes with ``EmbodimentTag.NEW_EMBODIMENT`` or custom
-    embodiments not in the pre-registered registry.
+    This is the programmatic equivalent of ``register_modality_config`` in
+    GR00T.  Use it to support fine-tunes with ``EmbodimentTag.NEW_EMBODIMENT``
+    or custom embodiments not in the pre-registered registry.
 
     Args:
         embodiment_tag: The embodiment identifier to register.
@@ -510,11 +510,58 @@ def register_embodiment_joints(
             existing one (e.g. a different whole-body controller on the same
             robot).
 
-    Example::
+    The intended pattern is to call this from the same Python file that calls
+    ``register_modality_config`` for the user's fine-tune (the file passed via
+    ``--modality-config-path`` to the GR00T finetune script and imported before
+    running the export).  That keeps modality and joint registration colocated.
+
+    Example -- inheriting all joints from an existing embodiment::
+
+        from gr00t.configs.data.embodiment_configs import register_modality_config
+        from gr00t.data.types import EmbodimentTag, ModalityConfig
+        from joint_name_parser import register_embodiment_joints
+
+        my_config = {
+            "video": ModalityConfig(...),
+            "state": ModalityConfig(...),
+            "action": ModalityConfig(modality_keys=[
+                "left_arm", "right_arm",
+                "effort_left_arm", "effort_right_arm",  # FF torques
+            ], ...),
+            "language": ModalityConfig(...),
+        }
+        register_modality_config(my_config, embodiment_tag=EmbodimentTag.NEW_EMBODIMENT)
+
+        # Same robot as unitree_g1 -- borrow its joint name lists.  effort_*
+        # group lookups auto-fall-back to the matching position group, so we
+        # don't need to enumerate effort joints separately.
+        register_embodiment_joints(
+            EmbodimentTag.NEW_EMBODIMENT,
+            joints={},
+            base_embodiment="unitree_g1",
+        )
+
+    Example -- declaring joints for a fully custom robot::
 
         register_embodiment_joints(
             EmbodimentTag.NEW_EMBODIMENT,
-            joints={},  # use everything from unitree_g1
+            joints={
+                "state": {
+                    "arm": ["shoulder", "elbow", "wrist"],
+                    "gripper": ["gripper_finger"],
+                },
+                "action": {
+                    "arm": ["shoulder_cmd", "elbow_cmd", "wrist_cmd"],
+                    "gripper": ["gripper_cmd"],
+                },
+            },
+        )
+
+    Example -- overriding a few groups on top of a base embodiment::
+
+        register_embodiment_joints(
+            EmbodimentTag.NEW_EMBODIMENT,
+            joints={"state": {"left_arm": ["my_custom_left_shoulder", ...]}},
             base_embodiment="unitree_g1",
         )
     """
