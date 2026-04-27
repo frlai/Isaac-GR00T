@@ -553,8 +553,17 @@ class Gr00tN1d7Processor(BaseProcessor):
                 [torch.from_numpy(np.zeros_like(state_data[key])) for key in state_keys], dim=-1
             )
         else:
+            # Leapp annotations can turn normalized arrays into tensor subclasses during tracing.
+            # Keep the regular numpy path but avoid wrapping tensors with torch.from_numpy().
+            normalized_state_tensors = [
+                torch.from_numpy(norm_state_dict[key])
+                if isinstance(norm_state_dict[key], np.ndarray)
+                else norm_state_dict[key]
+                for key in state_keys
+            ]
             normalized_states = torch.cat(
-                [torch.from_numpy(norm_state_dict[key]) for key in state_keys], dim=-1
+                normalized_state_tensors,
+                dim=-1,
             )
         normalized_states = torch.cat(
             [

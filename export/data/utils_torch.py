@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Torch versions of normalization utilities for ONNX export.
 
@@ -242,13 +245,12 @@ def xyz_rot6d_to_homogeneous(xyz_rot6d: Tensor) -> Tensor:
     
     rot_matrix = rot6d_to_matrix(rot6d)  # (..., 3, 3)
     
-    # Build homogeneous matrix
-    H = torch.zeros(*shape, 4, 4, dtype=xyz_rot6d.dtype, device=xyz_rot6d.device)
-    H[..., :3, :3] = rot_matrix
-    H[..., :3, 3] = xyz
-    H[..., 3, 3] = 1.0
-    
-    return H
+    # Build homogeneous matrix functionally so leapp tracing is preserved.
+    top = torch.cat([rot_matrix, xyz.unsqueeze(-1)], dim=-1)
+    zeros = torch.zeros_like(xyz[..., :1])
+    ones = torch.ones_like(zeros)
+    bottom = torch.cat([zeros, zeros, zeros, ones], dim=-1).unsqueeze(-2)
+    return torch.cat([top, bottom], dim=-2)
 
 
 def homogeneous_to_xyz_rot6d(H: Tensor) -> Tensor:
@@ -289,13 +291,12 @@ def invert_homogeneous(T: Tensor) -> Tensor:
     # t_inv = -R_inv @ t
     t_inv = -torch.matmul(R_inv, t.unsqueeze(-1)).squeeze(-1)
     
-    # Build inverse
-    T_inv = torch.zeros_like(T)
-    T_inv[..., :3, :3] = R_inv
-    T_inv[..., :3, 3] = t_inv
-    T_inv[..., 3, 3] = 1.0
-    
-    return T_inv
+    # Build inverse functionally so traced tensors are not lost through partial assignment.
+    top = torch.cat([R_inv, t_inv.unsqueeze(-1)], dim=-1)
+    zeros = torch.zeros_like(t_inv[..., :1])
+    ones = torch.ones_like(zeros)
+    bottom = torch.cat([zeros, zeros, zeros, ones], dim=-1).unsqueeze(-2)
+    return torch.cat([top, bottom], dim=-2)
 
 
 def convert_to_absolute_action_eef(

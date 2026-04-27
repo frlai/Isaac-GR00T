@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 GR00T model export using leapp framework.
 
@@ -15,9 +18,9 @@ from leapp import annotate
 import argparse
 
 args = argparse.ArgumentParser()
-args.add_argument("--model_path", type=str, default='nvidia/GR00T-N1.6-3B')
-args.add_argument("--dataset_path", type=str, default=os.path.join(os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/gr1.PickNPlace"))
-args.add_argument("--embodiment_tag", type=str, default='gr1')
+args.add_argument("--model_path", type=str, default='nvidia/GR00T-N1.7-3B')
+args.add_argument("--dataset_path", type=str, default=os.path.join(os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/droid_sample"))
+args.add_argument("--embodiment_tag", type=str, default='OXE_DROID_RELATIVE_EEF_RELATIVE_JOINT')
 args.add_argument("--video_backend", type=str, default='torchcodec')
 args.add_argument("--output_name", type=str, default='exported_gr00t')
 args = args.parse_args()

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Policy comparison utilities for evaluating original vs modified GR00T policy.
 
@@ -5,31 +8,37 @@ This module provides tools to compare the outputs of the original GR00T policy
 against the modified (torch-traceable) version to validate export accuracy.
 """
 
+import argparse
 import gc
-import numpy as np
-import torch
-import matplotlib.pyplot as plt
+import os
 import time
 
-from utils import get_policy_and_dataset, get_gr00t_input, set_all_seeds
-from policy_modifications import make_modifications
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
+import gr00t
 from gr00t.data.dataset.sharded_single_step_dataset import extract_step_data
 from leapp.inference_manager import InferenceManager
-import os
 
-
-import argparse
-import gr00t
+from policy_modifications import make_modifications
+from utils import get_gr00t_input, get_policy_and_dataset, set_all_seeds
 
 args = argparse.ArgumentParser()
-args.add_argument("--model_path", type=str, default='nvidia/GR00T-N1.6-3B')
-args.add_argument("--dataset_path", type=str, default=os.path.join(os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/gr1.PickNPlace"))
-args.add_argument("--embodiment_tag", type=str, default='gr1')
+args.add_argument("--model_path", type=str, default="nvidia/GR00T-N1.7-3B")
+args.add_argument(
+    "--dataset_path",
+    type=str,
+    default=os.path.join(
+        os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/droid_sample"
+    ),
+)
+args.add_argument("--embodiment_tag", type=str, default="OXE_DROID_RELATIVE_EEF_RELATIVE_JOINT")
 args.add_argument("--video_backend", type=str, default='torchcodec')
 args.add_argument("--model_yaml_path", type=str, default='exported_gr00t/exported_gr00t.yaml')
 args.add_argument("--max_steps", type=int, default=350)
-args.add_argument("--use_exported", type=bool, default=True)
-args.add_argument("--show_plots", type=bool, default=True)
+args.add_argument("--use_exported", action=argparse.BooleanOptionalAction, default=True)
+args.add_argument("--show_plots", action=argparse.BooleanOptionalAction, default=True)
 args = args.parse_args()
 
 
@@ -79,7 +88,7 @@ def collect_policy_outputs(policy, dataset, joint_names, max_steps, policy_name,
 
 
 def collect_exported_policy_outputs(exported_policy, dataset, modality_config, 
-                                     embodiment_tag, joint_names, video_key, initial_noise_list, max_steps):
+                                     embodiment_tag, joint_names, video_keys, initial_noise_list, max_steps):
     """
     Run exported policy on multiple steps and collect outputs as numpy arrays.
     
@@ -89,7 +98,7 @@ def collect_exported_policy_outputs(exported_policy, dataset, modality_config,
         modality_config: Modality configuration
         embodiment_tag: Embodiment tag
         joint_names: List of action output joint names to collect
-        video_key: Key for video input (e.g., 'ego_view_bg_crop_pad_res256_freq20')
+        video_keys: Video input keys required by the exported preprocessing graph
         max_steps: Number of steps to process
         
     Returns:
@@ -104,22 +113,17 @@ def collect_exported_policy_outputs(exported_policy, dataset, modality_config,
             embodiment_tag=embodiment_tag, allow_padding=False
         )
         
-        # Build inputs dict for exported policy
-        # Use actual state keys from step_data.states (different from action output keys)
-        # State inputs: left_leg, right_leg, waist, left_arm, right_arm, left_hand, right_hand
-        # Action outputs: left_arm, right_arm, left_hand, right_hand, waist, base_height_command, navigate_command
+        # Build inputs dict for exported policy from the current embodiment schema.
         inputs = {}
         state_keys = list(step_data.states.keys())
         for state_name in state_keys:
             input_key = f"preprocess_state/{state_name}"
-            # States are numpy arrays, convert to tensor
             state_data = step_data.states[state_name]
             inputs[input_key] = torch.from_numpy(state_data).float()
         
-        # Add video input
-        # Stack images and convert to tensor - keep as uint8 (model expects raw image data)
-        video_data = np.stack(step_data.images[video_key])  # (T, H, W, C)
-        inputs[f"preprocess_video/{video_key}"] = torch.from_numpy(video_data).to(torch.float32)  # Keep uint8, don't convert to float
+        for video_key in video_keys:
+            video_data = np.stack(step_data.images[video_key])  # (T, H, W, C)
+            inputs[f"preprocess_video/{video_key}"] = torch.from_numpy(video_data).to(torch.float32)
         inputs['action_head/initial_noise'] = initial_noise_list[step_count]
         
         # Run exported policy
@@ -249,6 +253,26 @@ def print_error_statistics(joint_name, stats, max_steps):
               f"p90={s['p90']:.2e}, p99={s['p99']:.2e}, p99.9={s['p999']:.2e}")
 
 
+def get_effective_max_steps(episode_data, modality_config, requested_max_steps):
+    """Cap steps so future delta indices do not read past the episode."""
+    max_positive_delta = max(
+        max(config.delta_indices) for config in modality_config.values() if config.delta_indices
+    )
+    available_steps = len(episode_data) - max_positive_delta
+    if available_steps <= 0:
+        raise ValueError(
+            f"Episode length {len(episode_data)} is too short for max delta {max_positive_delta}"
+        )
+
+    effective_max_steps = min(requested_max_steps, available_steps)
+    if effective_max_steps < requested_max_steps:
+        print(
+            f"Requested {requested_max_steps} steps, but only {effective_max_steps} are valid "
+            f"for episode length {len(episode_data)} and max delta {max_positive_delta}."
+        )
+    return effective_max_steps
+
+
 def plot_joint_comparison(joint_name, gt_data, original_data, modified_data, exported, output_dir="."):
     """
     Create comparison plot for a single joint.
@@ -260,6 +284,7 @@ def plot_joint_comparison(joint_name, gt_data, original_data, modified_data, exp
         modified_data: Modified policy outputs (num_steps, num_dims)
         output_dir: Directory to save plot
     """
+    os.makedirs(output_dir, exist_ok=True)
     num_dims = gt_data.shape[1]
     
     fig, axes = plt.subplots(nrows=num_dims, ncols=1, figsize=(12, 2.5*num_dims))
@@ -291,9 +316,9 @@ def plot_joint_comparison(joint_name, gt_data, original_data, modified_data, exp
 def plot_policy_comparison(max_steps=100, output_dir=".", show_plots=True,
                            use_exported=False, 
                            exported_model_path='test_export_gr00t/test_export_gr00t.yaml',
-                           model_path='nvidia/GR00T-N1.6-3B',
+                           model_path='nvidia/GR00T-N1.7-3B',
                            dataset_path=None,
-                           embodiment_tag='gr1',
+                           embodiment_tag='OXE_DROID_RELATIVE_EEF_RELATIVE_JOINT',
                            video_backend='torchcodec'):
     """
     Plot comparison of ground truth actions, original GR00T policy outputs, 
@@ -320,6 +345,7 @@ def plot_policy_comparison(max_steps=100, output_dir=".", show_plots=True,
     embodiment_tag = temp_policy.embodiment_tag
     episode_data = dataset[0]
     print(f"Episode length: {len(episode_data)}")
+    max_steps = get_effective_max_steps(episode_data, modality_config, max_steps)
     
     # Get joint names and video key from first step
     first_step_data = extract_step_data(
@@ -328,9 +354,8 @@ def plot_policy_comparison(max_steps=100, output_dir=".", show_plots=True,
     )
     joint_names = list(first_step_data.actions.keys())
     video_keys = list(first_step_data.images.keys())
-    video_key = video_keys[0] if video_keys else None
     print(f"Found joints: {joint_names}")
-    print(f"Found video key: {video_key}")
+    print(f"Found video keys: {video_keys}")
     
     del temp_policy
     gc.collect()
@@ -415,7 +440,7 @@ def plot_policy_comparison(max_steps=100, output_dir=".", show_plots=True,
         time_start = time.time()
         comparison_outputs = collect_exported_policy_outputs(
             exported_policy, dataset, modality_config, embodiment_tag,
-            joint_names, video_key, initial_noise_list, max_steps
+            joint_names, video_keys, initial_noise_list, max_steps
         )
         time_end = time.time()
         modified_time_taken = time_end - time_start
@@ -433,21 +458,30 @@ def plot_policy_comparison(max_steps=100, output_dir=".", show_plots=True,
         gt_data = gt_outputs[joint_name]
         original_data = original_outputs[joint_name]
         exported_data = comparison_outputs[joint_name]
+        if exported_data is None:
+            raise KeyError(f"No comparison output collected for joint '{joint_name}'")
         
         # Compute and print statistics
         stats = compute_error_statistics(original_data, exported_data)
         print_error_statistics(joint_name, stats, max_steps)
         
         # Create plot (with optional exported data)
-        plot_joint_comparison(joint_name, gt_data, original_data, exported_data, output_dir)
+        plot_joint_comparison(
+            joint_name,
+            gt_data,
+            original_data,
+            exported_data,
+            exported=use_exported,
+            output_dir=output_dir,
+        )
     
     if show_plots:
         plt.show()
     
-    print(f"  Original policy:")
+    print("  Original policy:")
     print(f"  time taken: {original_time_taken} seconds")
     print(f"  time per step: {original_time_taken / max_steps} seconds")
-    print(f"  Modified policy:")
+    print("  Modified policy:")
     print(f"  time taken: {modified_time_taken} seconds")
     print(f"  time per step: {modified_time_taken / max_steps} seconds")
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 import torch
 import os
 import gr00t
@@ -103,16 +106,21 @@ def compare_tensors(tensor1, tensor2, name1="Tensor1", name2="Tensor2", rtol=1e-
         return False
 
 
-def get_policy_and_dataset(model_path = 'nvidia/GR00T-N1.6-3B', 
-                           dataset_path = os.path.join(os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/gr1.PickNPlace"), 
-                           embodiment_tag = 'gr1', video_backend = 'torchcodec'):
+def get_policy_and_dataset(
+    model_path="nvidia/GR00T-N1.7-3B",
+    dataset_path=os.path.join(
+        os.path.dirname(os.path.dirname(gr00t.__file__)), "demo_data/droid_sample"
+    ),
+    embodiment_tag="OXE_DROID_RELATIVE_EEF_RELATIVE_JOINT",
+    video_backend="torchcodec",
+):
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
     policy = Gr00tPolicy(
         model_path=model_path,
-        embodiment_tag=EmbodimentTag(embodiment_tag),
+        embodiment_tag=EmbodimentTag.resolve(embodiment_tag),
         device=device,
         strict=True,
     )

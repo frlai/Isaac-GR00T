@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Centralized registry mapping embodiment -> group_name -> individual joint names.
 
@@ -270,6 +273,59 @@ EMBODIMENT_JOINT_REGISTRY: Dict[str, Dict[str, Dict[str, List[str]]]] = {
             "pitch": ["delta_pitch"],
             "yaw": ["delta_yaw"],
             "gripper": ["gripper_cmd"],
+        },
+    },
+
+    # =========================================================================
+    # OXE DROID - DROID relative EEF + gripper + joint representation.
+    # N1.7 uses eef_9d (XYZ + rot6d), gripper_position (1D), joint_position (7D).
+    # =========================================================================
+    "oxe_droid_relative_eef_relative_joint": {
+        "state": {
+            "eef_9d": [
+                "eef_x",
+                "eef_y",
+                "eef_z",
+                "eef_rot6d_0",
+                "eef_rot6d_1",
+                "eef_rot6d_2",
+                "eef_rot6d_3",
+                "eef_rot6d_4",
+                "eef_rot6d_5",
+            ],
+            "gripper_position": ["gripper_position"],
+            "joint_position": [
+                "joint_0",
+                "joint_1",
+                "joint_2",
+                "joint_3",
+                "joint_4",
+                "joint_5",
+                "joint_6",
+            ],
+        },
+        "action": {
+            "eef_9d": [
+                "target_eef_x",
+                "target_eef_y",
+                "target_eef_z",
+                "target_eef_rot6d_0",
+                "target_eef_rot6d_1",
+                "target_eef_rot6d_2",
+                "target_eef_rot6d_3",
+                "target_eef_rot6d_4",
+                "target_eef_rot6d_5",
+            ],
+            "gripper_position": ["target_gripper_position"],
+            "joint_position": [
+                "target_joint_0",
+                "target_joint_1",
+                "target_joint_2",
+                "target_joint_3",
+                "target_joint_4",
+                "target_joint_5",
+                "target_joint_6",
+            ],
         },
     },
 

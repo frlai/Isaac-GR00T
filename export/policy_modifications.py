@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Policy modifications for making GR00T traceable/exportable.
 
@@ -42,7 +45,7 @@ def _backbone_forward_with_int32(self, vl_input):
     return converted_outputs
 
 
-def _action_head_get_action_with_bool(self, backbone_outputs, action_inputs, initial_noise=None):
+def _action_head_get_action_with_bool(self, backbone_outputs, action_inputs, options=None, initial_noise=None):
     """
     Action head get_action that converts int32 mask inputs back to bool.
     Calls self._original_get_action which is the original get_action method.
@@ -55,7 +58,12 @@ def _action_head_get_action_with_bool(self, backbone_outputs, action_inputs, ini
         else:
             converted_backbone_outputs[k] = v
     
-    return self._original_get_action(converted_backbone_outputs, action_inputs, initial_noise=initial_noise)
+    return self._original_get_action(
+        converted_backbone_outputs,
+        action_inputs,
+        options=options,
+        initial_noise=initial_noise,
+    )
 
 
 def get_action_traceable(self, data, initial_noise=None):
@@ -123,7 +131,7 @@ def get_action_traceable(self, data, initial_noise=None):
     static_outputs = {
         'input_ids': collated_inputs['inputs']['input_ids'],
         'attention_mask': collated_inputs['inputs']['attention_mask'],
-        'image_sizes': collated_inputs['inputs']['image_sizes'],
+        'image_grid_thw': collated_inputs['inputs']['image_grid_thw'],
         'embodiment_id': collated_inputs['inputs']['embodiment_id']
     }
     annotate.output_tensors(
@@ -221,15 +229,21 @@ def make_modifications(policy):
         Modified policy
     """
     # ==================== Backbone modifications ====================
-    vision_model_module = get_modified_vision_model(
-        policy.model.backbone.model.vision_model
-    )
-    language_model_module = get_modified_language_model(
-        policy.model.backbone.model.language_model
-    )
-    policy.model.backbone.model.vision_model = vision_model_module
-    policy.model.backbone.model.language_model = language_model_module
-    policy.model.backbone.model.eval()
+    # N1.7 uses Qwen3VLForConditionalGeneration:
+    #   policy.model.backbone.model.model.visual
+    #   policy.model.backbone.model.model.language_model
+    # Patch those live modules in place instead of replacing the removed N1.6
+    # `vision_model` / `language_model` attributes.
+    qwen_model = policy.model.backbone.model
+    if hasattr(qwen_model, "model") and hasattr(qwen_model.model, "visual"):
+        get_modified_vision_model(qwen_model.model.visual)
+        get_modified_language_model(qwen_model.model.language_model)
+    else:
+        vision_model_module = get_modified_vision_model(qwen_model.vision_model)
+        language_model_module = get_modified_language_model(qwen_model.language_model)
+        qwen_model.vision_model = vision_model_module
+        qwen_model.language_model = language_model_module
+    qwen_model.eval()
 
     # Use float32 (half precision causes significant errors)
     policy.model.backbone = policy.model.backbone.float()
