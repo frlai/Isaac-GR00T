@@ -10,7 +10,9 @@ tracing and export framework.
 
 from utils import get_policy_and_dataset, get_gr00t_input
 from policy_modifications import make_modifications, get_action_traceable
+from joint_name_parser import EMBODIMENT_JOINT_REGISTRY, register_embodiment_joints
 import os
+import json
 import gr00t
 import leapp
 from leapp import annotate
@@ -23,7 +25,48 @@ args.add_argument("--dataset_path", type=str, default=os.path.join(os.path.dirna
 args.add_argument("--embodiment_tag", type=str, default='OXE_DROID_RELATIVE_EEF_RELATIVE_JOINT')
 args.add_argument("--video_backend", type=str, default='torchcodec')
 args.add_argument("--output_name", type=str, default='exported_gr00t')
+args.add_argument("--joint_config", type=str, default=None,
+                  help="Path to a JSON file with joint names: {state: {group: [names]}, action: {group: [names]}}. "
+                       "Auto-detected from dataset modality.json if not provided.")
 args = args.parse_args()
+
+
+def _auto_joint_config_from_modality(dataset_path: str) -> dict:
+    """Build a joint config from the dataset's modality.json using placeholder names."""
+    modality_path = os.path.join(dataset_path, "meta", "modality.json")
+    with open(modality_path) as f:
+        modality = json.load(f)
+
+    joints = {}
+    for modality_type in ("state", "action"):
+        if modality_type not in modality:
+            continue
+        joints[modality_type] = {
+            group: [f"{group}_{i}" for i in range(spec["end"] - spec["start"])]
+            for group, spec in modality[modality_type].items()
+        }
+    return joints
+
+
+def maybe_register_embodiment_joints(embodiment_tag: str, dataset_path: str, joint_config_path: str = None):
+    """Register joint names for embodiment_tag if not already in the registry.
+
+    Uses joint_config_path if provided, otherwise auto-detects from dataset modality.json.
+    No-op if the embodiment is already registered.
+    """
+    tag = embodiment_tag.lower()
+    if tag in EMBODIMENT_JOINT_REGISTRY:
+        return
+
+    if joint_config_path is not None:
+        with open(joint_config_path) as f:
+            joints = json.load(f)
+        print(f"Registering joint names for '{tag}' from {joint_config_path}")
+    else:
+        joints = _auto_joint_config_from_modality(dataset_path)
+        print(f"Auto-registering joint names for '{tag}' from {dataset_path}/meta/modality.json")
+
+    register_embodiment_joints(tag, joints)
 
 
 def export_gr00t_with_leapp(policy, data, output_name='exported_gr00t'):
@@ -63,8 +106,10 @@ def export_gr00t_with_leapp(policy, data, output_name='exported_gr00t'):
 
 def main():
     """Main entry point for export."""
+    maybe_register_embodiment_joints(args.embodiment_tag, args.dataset_path, args.joint_config)
+
     # Load policy and dataset
-    policy, dataset = get_policy_and_dataset(model_path = args.model_path, 
+    policy, dataset = get_policy_and_dataset(model_path = args.model_path,
                                             dataset_path = args.dataset_path, 
                                             embodiment_tag = args.embodiment_tag, video_backend = args.video_backend)
                         
