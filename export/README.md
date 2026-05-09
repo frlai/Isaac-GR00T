@@ -40,9 +40,7 @@ uv run python scripts/deployment/standalone_inference_script.py \
 
 ### 4. Install leapp
 
-```bash
-uv pip install dist/leapp-0.4.0-py3-none-any.whl
-```
+`leapp` is included in the project dependencies and is installed automatically by `uv sync`.
 
 ## Usage
 
@@ -135,9 +133,4 @@ uv run python export/policy_comparison.py  --model_path nvidia/GR00T-N1.6-G1-PnP
 
 **Generated plots:**
 Each plot shows ground truth actions, original policy predictions, and exported policy predictions over time for visual comparison. Plots are saved to the current directory:
-- `policy_comparison_left_arm.png`
-- `policy_comparison_right_arm.png`
-- `policy_comparison_left_hand.png`
-- `policy_comparison_right_hand.png`
-- `policy_comparison_waist.png`
-
+- `policy_comparison<group_name>.png`
