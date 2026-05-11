@@ -116,7 +116,7 @@ GR00T relies on submodules for certain dependencies. Include them when cloning:
 
 **Note:** `git-lfs` is **required** to download parquet data files in `/demo_data`. Install it before cloning: `sudo apt install git-lfs && git lfs install`.
 ```sh
-git clone --recurse-submodules https://github.com/NVIDIA/Isaac-GR00T
+git clone --recurse-submodules https://github.com/frlai/Isaac-GR00T.git
 cd Isaac-GR00T
 ```
 
