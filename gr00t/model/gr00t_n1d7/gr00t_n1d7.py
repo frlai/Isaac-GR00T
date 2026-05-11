@@ -189,7 +189,7 @@ class Gr00tN1d7ActionHead(nn.Module):
         backbone_output = self.process_backbone_output(backbone_output)
 
         # Get vision and language embeddings.
-        vl_embeds = backbone_output.backbone_features
+        vl_embeds = backbone_output["backbone_features"]
         device = vl_embeds.device
 
         # Get embodiment ID.
@@ -232,11 +232,11 @@ class Gr00tN1d7ActionHead(nn.Module):
 
         # Join vision, language, state and action embedding along sequence dimension.
         sa_embs = torch.cat((state_features, action_features), dim=1)
-        vl_attn_mask = backbone_output.backbone_attention_mask
+        vl_attn_mask = backbone_output["backbone_attention_mask"]
 
         if self.config.use_alternate_vl_dit:
-            image_mask = backbone_output.image_mask
-            backbone_attention_mask = backbone_output.backbone_attention_mask
+            image_mask = backbone_output["image_mask"]
+            backbone_attention_mask = backbone_output["backbone_attention_mask"]
             model_output, _ = self.model(
                 hidden_states=sa_embs,
                 encoder_hidden_states=vl_embeds,
