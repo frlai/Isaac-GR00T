@@ -250,6 +250,31 @@ def generate_rel_stats(dataset_path: Path | str, embodiment_tag: EmbodimentTag) 
         json.dump(to_json_serializable(dict(stats)), f, indent=4)
 
 
+def ensure_stats(
+    dataset_path: Path | str,
+    embodiment_tag: "str | EmbodimentTag",
+    modality_config: dict | None = None,
+) -> None:
+    """Ensure ``meta/stats.json`` and ``meta/relative_stats.json`` exist for *dataset_path*.
+
+    Idempotent. Distributed-safe: only rank 0 writes; all ranks barrier. If
+    *modality_config* is provided and the tag is not in ``MODALITY_CONFIGS``,
+    it is registered first so ``generate_rel_stats`` can resolve the action
+    config.
+    """
+    import torch
+
+    from gr00t.experiment.dist_utils import barrier
+
+    tag = EmbodimentTag.resolve(embodiment_tag)
+    if modality_config is not None and tag.value not in MODALITY_CONFIGS:
+        MODALITY_CONFIGS[tag.value] = modality_config
+    if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
+        generate_stats(dataset_path)
+        generate_rel_stats(dataset_path, tag)
+    barrier()
+
+
 def main(
     dataset_path: Path | str,
     embodiment_tag: EmbodimentTag,

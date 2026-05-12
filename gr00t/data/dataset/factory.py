@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import numpy as np
-import torch
 from tqdm import tqdm
 
 from gr00t.configs.base_config import Config
@@ -22,8 +21,7 @@ from gr00t.data.dataset.sharded_mixture_dataset import ShardedMixtureDataset
 from gr00t.data.dataset.sharded_single_step_dataset import ShardedSingleStepDataset
 from gr00t.data.embodiment_tags import EmbodimentTag
 from gr00t.data.interfaces import BaseProcessor
-from gr00t.data.stats import generate_rel_stats, generate_stats
-from gr00t.experiment.dist_utils import barrier
+from gr00t.data.stats import ensure_stats
 
 
 class DatasetFactory:
@@ -54,14 +52,7 @@ class DatasetFactory:
                 embodiment_tag = dataset_spec.embodiment_tag
                 assert embodiment_tag is not None, "Embodiment tag is required"
                 assert self.config.data.mode == "single_turn", "Only single turn mode is supported"
-                if torch.distributed.is_initialized():
-                    if torch.distributed.get_rank() == 0:
-                        generate_stats(dataset_path)
-                        generate_rel_stats(dataset_path, EmbodimentTag(embodiment_tag))
-                else:
-                    generate_stats(dataset_path)
-                    generate_rel_stats(dataset_path, EmbodimentTag(embodiment_tag))
-                barrier()
+                ensure_stats(dataset_path, embodiment_tag)
                 dataset = ShardedSingleStepDataset(
                     dataset_path=dataset_path,
                     embodiment_tag=EmbodimentTag(embodiment_tag),
