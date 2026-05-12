@@ -61,6 +61,7 @@ uv run python export/export_with_leapp.py
 | `--embodiment_tag` | str | `gr1` | Embodiment tag for the robot |
 | `--video_backend` | str | `torchcodec` | Video decoding backend |
 | `--output_name` | str | `exported_gr00t` | Name for the exported model directory |
+| `--joint_config` | str | `None` (auto-detect) | Path to a JSON file with joint names. Required for G1 fine-tunes to get real ROS joint names in the exported YAML — see `export/data/g1_joints.json`. |
 
 **Example:**
 
@@ -79,6 +80,23 @@ Once downloaded you can run the export using:
 
 ```bash
 uv run python export/export_with_leapp.py --model_path nvidia/GR00T-N1.6-G1-PnPAppleToPlate --embodiment_tag unitree_g1 --dataset_path <path to downloaded dataset>
+```
+
+### For Custom G1 Fine-Tunes (NEW_EMBODIMENT)
+
+For fine-tuned policies registered under `EmbodimentTag.NEW_EMBODIMENT` (the
+default path produced by the fine-tune tutorial), pass `--joint_config` so the
+exported YAML embeds real ROS joint names (`left_shoulder_pitch_joint`, ...)
+instead of placeholders. The deploy stack maps joint commands by name, so this
+matters for downstream control.
+
+```bash
+uv run python export/export_with_leapp.py \
+    --model_path <path to fine-tuned checkpoint> \
+    --embodiment_tag new_embodiment \
+    --dataset_path <path to lerobot dataset> \
+    --joint_config export/data/g1_joints.json \
+    --output_name <export-name>
 ```
 
 
