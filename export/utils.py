@@ -9,6 +9,7 @@ from gr00t.data.types import MessageType
 from gr00t.data.embodiment_tags import EmbodimentTag
 from gr00t.data.dataset.lerobot_episode_loader import LeRobotEpisodeLoader
 from gr00t.data.dataset.sharded_single_step_dataset import extract_step_data
+from gr00t.data.stats import ensure_stats
 import random
 import numpy as np
 
@@ -127,7 +128,8 @@ def get_policy_and_dataset(
 
     modality_config = policy.get_modality_config()
 
-    # Create the dataset
+    ensure_stats(dataset_path, embodiment_tag, modality_config=modality_config)
+
     dataset = LeRobotEpisodeLoader(
         dataset_path=dataset_path,
         modality_configs=modality_config,
