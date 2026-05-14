@@ -1,0 +1,42 @@
+Isaac GR00T
+Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This product includes third-party software and source code that is licensed
+under separate terms. See ATTRIBUTIONS.md for third-party attributions and
+retain the upstream license files located with bundled third-party source code.
+
+Bundled third-party source code:
+
+- LIBERO
+  Location: external_dependencies/LIBERO
+  Upstream: https://github.com/Lifelong-Robot-Learning/LIBERO
+  License: MIT
+  Copyright: Copyright (c) 2023 Lifelong Robot Learning
+  License file: external_dependencies/LIBERO/LICENSE
+
+- SimplerEnv
+  Location: external_dependencies/SimplerEnv
+  Upstream: https://github.com/squarefk/SimplerEnv.git
+  License: MIT
+  Copyright: Copyright (c) 2024 simpler-env
+  License file: external_dependencies/SimplerEnv/LICENSE
+
+- RoboCasa
+  Location: external_dependencies/robocasa
+  Upstream: https://github.com/squarefk/robocasa
+  License: MIT
+  Copyright: Copyright (c) 2024 the RoboCasa Team
+  License file: external_dependencies/robocasa/LICENSE
+
+  The upstream RoboCasa license also includes the following notice:
+
+  This software includes the partial implementation of Deepmind Mujoco
+  https://github.com/deepmind/mujoco.
+  Deepmind Mujoco is licensed under the Apache License, Version 2.0 (the
+  "License"); you may not use the files except in compliance with the License.
+
+  You may obtain a copy of the License at
+      http://www.apache.org/licenses/LICENSE-2.0
+
+Other third-party dependencies, including the leapp Python package used by the
+export workflow, are listed in ATTRIBUTIONS.md.

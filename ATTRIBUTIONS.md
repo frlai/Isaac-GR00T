@@ -1,3 +1,57 @@
+Third-party source and dependency attributions
+==============================================
+
+This file lists third-party licenses for Python dependencies and bundled source
+code used by this repository. The root NOTICE file summarizes bundled
+third-party source code and preserves upstream NOTICE-style text where present.
+
+Bundled third-party source code
+-------------------------------
+
+LIBERO
+MIT License
+https://github.com/Lifelong-Robot-Learning/LIBERO
+Copyright (c) 2023 Lifelong Robot Learning
+Bundled location: external_dependencies/LIBERO
+License file: external_dependencies/LIBERO/LICENSE
+
+SimplerEnv
+MIT License
+https://github.com/squarefk/SimplerEnv.git
+Copyright (c) 2024 simpler-env
+Bundled location: external_dependencies/SimplerEnv
+License file: external_dependencies/SimplerEnv/LICENSE
+
+RoboCasa
+MIT License
+https://github.com/squarefk/robocasa
+Copyright (c) 2024 the RoboCasa Team
+Bundled location: external_dependencies/robocasa
+License file: external_dependencies/robocasa/LICENSE
+
+The upstream RoboCasa license also includes the following notice:
+
+This software includes the partial implementation of Deepmind Mujoco
+https://github.com/deepmind/mujoco.
+Deepmind Mujoco is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use the files except in compliance with the License.
+
+You may obtain a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Additional project dependencies
+-------------------------------
+
+leapp
+Apache-2.0
+https://github.com/nvidia-isaac/leapp
+https://pypi.org/project/leapp/
+Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+Runtime dependency used by the export workflow.
+
+Generated Python dependency attributions
+----------------------------------------
+
 GitPython
 3.1.46
 BSD-3-Clause
